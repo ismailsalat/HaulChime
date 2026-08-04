@@ -45,14 +45,41 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Refuse to merge a committed .env or API key
+
+      - name: Refuse a committed .env file
         run: |
           if git ls-files --error-unmatch backend/.env 2>/dev/null; then
             echo "::error::backend/.env is tracked by git. Remove it and rotate every key inside."
             exit 1
           fi
-          if git grep -nE '(bk_(us|eu)1_[A-Za-z0-9]|auth-token=[A-Za-z0-9]{10})' -- . ':!*.md' ':!.github/*'; then
-            echo "::error::A live-looking API key is committed. Rotate it and remove it."
+          echo "No .env file is tracked."
+
+      - name: Scan for live API keys
+        run: |
+          # Real credentials are long and random. Test stubs and documentation
+          # placeholders are short or obviously fake, so the length floors below
+          # do most of the work and the placeholder filter catches the rest.
+          #
+          #   Bird     bk_us1_ / bk_eu1_ + 24+ random chars
+          #   Smarty   auth-token= or an auth token assignment, 16+ chars
+          #   AWS/R2   AKIA... access key ids
+          #   Generic  a long hex/base64 blob assigned to a *SECRET*/*TOKEN* name
+          PATTERN='bk_(us|eu)1_[A-Za-z0-9_-]{24,}'
+          PATTERN="$PATTERN|AKIA[0-9A-Z]{16}"
+          PATTERN="$PATTERN|(auth-token|AUTH_TOKEN|SMARTY_AUTH_TOKEN)[=:\" ]+[A-Za-z0-9]{16,}"
+          PATTERN="$PATTERN|(SECRET_KEY|HMAC_SECRET|SECRET_ACCESS_KEY)[=:\" ]+[A-Za-z0-9+/_-]{24,}"
+
+          # Placeholders that are meant to be in the repo. Anything matching
+          # these is a stub, an example, or documentation.
+          PLACEHOLDER='test|example|placeholder|your-|YOUR_|xxx|XXX|dummy|fake|sample'
+          PLACEHOLDER="$PLACEHOLDER|change-?(this|me)|random-?string|generate|paste|<|\.\.\."
+
+          HITS=$(git grep -nIE "$PATTERN" -- . ':!.github/workflows/*' \
+                 | grep -vE "$PLACEHOLDER" || true)
+
+          if [ -n "$HITS" ]; then
+            echo "$HITS"
+            echo "::error::A live-looking credential is committed. Rotate it, then remove it."
             exit 1
           fi
-          echo "No secrets found in tracked files."
+          echo "No live credentials found in tracked files."
