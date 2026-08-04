@@ -2,16 +2,14 @@
   "$schema": "https://railway.com/railway.schema.json",
   "build": {
     "builder": "RAILPACK",
+    "buildCommand": "node build.js",
     "watchPatterns": [
-      "/backend/**",
-      "/requirements.txt",
-      "/railway.json",
-      "/VERSION"
+      "/frontend/**"
     ]
   },
   "deploy": {
-    "startCommand": "cd backend && gunicorn \"app:create_app()\" --bind 0.0.0.0:$PORT --workers 2 --timeout 60",
-    "healthcheckPath": "/api/config",
+    "startCommand": "node server.js",
+    "healthcheckPath": "/",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
     "restartPolicyMaxRetries": 5

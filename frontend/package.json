@@ -1,10 +1,10 @@
 {
   "name": "haulchime-frontend",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "private": true,
   "description": "HaulChime static marketing site and quote form.",
   "scripts": {
     "build": "node build.js",
-    "start": "node build.js && npx --yes serve dist -l ${PORT:-8080}"
+    "start": "node build.js && node server.js"
   }
 }

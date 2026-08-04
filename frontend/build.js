@@ -7,13 +7,13 @@ let local = {};
 try { local = require('./site.local.json'); } catch (_) {}
 
 const SITE = {
-  name: 'HaulChime',
-  domain: local.domain || 'http://localhost:8080',
-  apiUrl: local.apiUrl || 'http://localhost:5002',
-  phoneDisplay: local.phoneDisplay || '',
-  phoneHref: local.phoneHref || '',
-  email: local.email || 'hello@haulchime.com',
-  region: local.region || 'South King County, WA',
+  name: process.env.SITE_NAME || local.name || 'HaulChime',
+  domain: process.env.SITE_URL || local.domain || 'http://localhost:8080',
+  apiUrl: process.env.API_URL || local.apiUrl || 'http://localhost:5002',
+  phoneDisplay: process.env.PUBLIC_PHONE_DISPLAY || local.phoneDisplay || '',
+  phoneHref: process.env.PUBLIC_PHONE_HREF || local.phoneHref || '',
+  email: process.env.PUBLIC_EMAIL || local.email || 'hello@haulchime.com',
+  region: process.env.PUBLIC_REGION || local.region || 'South King County, WA',
 };
 
 const OUT = path.join(__dirname, 'dist');
