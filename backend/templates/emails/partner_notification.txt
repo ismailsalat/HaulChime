@@ -1,0 +1,21 @@
+Subject: New HaulChime opportunity — {tier} — {reference}
+
+A new lead has been assigned to {contractor}.
+
+Reference: {reference}
+Service: {service_type}
+Job size: {job_size}
+Pickup ZIP: {zip_code}
+Destination ZIP: {destination_zip}
+Customer: {full_name}
+Phone: {phone}
+Email: {email}
+Urgency: {urgency}
+Photos: {photo_count}
+Lead price: ${lead_price}
+
+Inventory:
+{inventory}
+
+Description:
+{description}

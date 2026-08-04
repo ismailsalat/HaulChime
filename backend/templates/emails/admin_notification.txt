@@ -1,0 +1,22 @@
+Subject: New {tier} HaulChime lead — {reference}
+
+New lead: {reference}
+Service: {service_type}
+Job size: {job_size}
+Pickup ZIP: {zip_code}
+Destination ZIP: {destination_zip}
+Customer: {full_name}
+Phone: {phone}
+Email: {email}
+Urgency: {urgency}
+Photos: {photo_count}
+Tier: {tier}
+Lead price: ${lead_price}
+Score: {score}
+Matched partner: {contractor}
+
+Inventory:
+{inventory}
+
+Description:
+{description}

@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h1>Dashboard</h1>
+<p class="page-sub">HaulChime lead activity, routing and revenue.</p>
+<div class="filters">
+  {% for key, label in [('today','Today'),('7d','Last 7 days'),('month','This month')] %}
+  <a class="btn btn-sm {{ 'btn-secondary' if rng != key }}" href="{{ url_for('admin.dashboard', range=key) }}">{{ label }}</a>
+  {% endfor %}
+</div>
+<div class="grid">
+  <div class="stat"><span class="k">New leads</span><b>{{ total }}</b><span class="hint">received in this period</span></div>
+  <div class="stat"><span class="k">Qualified</span><b>{{ qualified }}</b><span class="hint">manually marked qualified</span></div>
+  <div class="stat"><span class="k">Sent</span><b>{{ sent }}</b><span class="hint">assigned to a partner</span></div>
+  <div class="stat"><span class="k">Billable</span><b>{{ billable }}</b><span class="hint">complete enough to sell</span></div>
+  <div class="stat"><span class="k">Lead revenue</span><b>{% if revenue %}${{ '%.2f' % revenue }}{% else %}—{% endif %}</b><span class="hint">recorded lead charges</span></div>
+</div>
+{% set attn_total = attn.review + attn.unassigned + attn.failed_deliveries + attn.no_partner_area + partners_over|length %}
+<div class="card"><h2>Needs attention</h2>
+{% if attn_total == 0 %}<p class="empty" style="padding:12px">Nothing needs attention right now.</p>{% else %}
+<ul style="margin:0;padding-left:20px;line-height:2">
+{% if attn.review %}<li><a href="{{ url_for('admin.leads', status='validation_needed') }}">{{ attn.review }} lead(s) waiting for review</a></li>{% endif %}
+{% if attn.unassigned %}<li><a href="{{ url_for('admin.leads', status='new') }}">{{ attn.unassigned }} lead(s) not assigned</a></li>{% endif %}
+{% if attn.no_partner_area %}<li><a href="{{ url_for('admin.leads', status='outside_service_area') }}">{{ attn.no_partner_area }} lead(s) outside partner coverage</a></li>{% endif %}
+{% if attn.failed_deliveries %}<li><a href="{{ url_for('admin.logs', tab='activity', errors_only=1) }}">{{ attn.failed_deliveries }} failed notification(s)</a></li>{% endif %}
+</ul>{% endif %}</div>
+<div class="table-card"><table><caption style="text-align:left;padding:14px 12px 4px;font-weight:700">Recent leads</caption>
+<tr><th>Customer</th><th>Service</th><th>Tier</th><th>ZIP</th><th>Status</th><th class="hide-sm">Created</th><th></th></tr>
+{% for l in recent %}<tr class="rowlink" onclick="location='{{ url_for('admin.lead_detail', lead_id=l.id) }}'">
+<td>{{ l.first_name }} {{ l.last_name }}</td><td>{{ L.service_label(l.service_type or l.pest_type) }}</td><td><span class="badge {{ L.quality_color(l.quality) }}">{{ (l.lead_tier or 'standard')|replace('_',' ')|title }} · ${{ '%.0f'|format(l.lead_price or 40) }}</span></td><td>{{ l.zip_code }}</td><td><span class="badge {{ L.status_color(l.status) }}">{{ L.status_label(l.status) }}</span></td><td class="hide-sm muted">{{ l.created_at.strftime('%b %d, %I:%M %p') }}</td><td><a href="{{ url_for('admin.lead_detail', lead_id=l.id) }}">View</a></td></tr>
+{% else %}<tr><td colspan="7" class="empty">No leads yet. Submit the public quote form to test the flow.</td></tr>{% endfor %}
+</table></div>
+<div class="card"><h2>Recent activity</h2>{% if activity %}<ul class="timeline">{% for a in activity %}<li class="{{ a.event_status if a.event_status != 'ok' }}"><time>{{ a.created_at.strftime('%b %d, %I:%M %p') }}</time>{{ L.event_label(a.event_type) }}{% if a.lead_reference %} — <a href="{{ url_for('admin.leads', q=a.lead_reference) }}">{{ a.lead_reference }}</a>{% endif %}</li>{% endfor %}</ul>{% else %}<p class="empty">No activity yet.</p>{% endif %}</div>
+<details class="adv"><summary>Performance details</summary><div class="fieldrow" style="margin-top:12px"><div><h2>Leads by service</h2>{% for svc,n in by_service %}<p class="kv"><span class="v">{{ L.service_label(svc) }} — {{ n }}</span></p>{% else %}<p class="muted">No data yet.</p>{% endfor %}</div><div><h2>Leads by source</h2>{% for src,n in by_source %}<p class="kv"><span class="v">{{ src or 'Direct' }} — {{ n }}</span></p>{% else %}<p class="muted">No data yet.</p>{% endfor %}</div></div></details>
+{% endblock %}

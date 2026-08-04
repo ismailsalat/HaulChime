@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+{% block title %}Leads{% endblock %}
+{% block content %}
+<div class="lead-head"><h1>Leads</h1><span class="bar-spacer"></span><a class="btn btn-secondary btn-sm" href="{{ url_for('admin.export_csv', **request.args) }}">Export CSV</a></div>
+<p class="page-sub">Every moving, junk-removal and hauling request, newest first.</p>
+<form method="get"><div class="filters">
+<div style="max-width:340px;flex:2"><label for="q">Search</label><input id="q" name="q" placeholder="Name, phone, ZIP, or HC- reference" value="{{ request.args.get('q','') }}"></div>
+<div><label for="fs">Status</label><select id="fs" name="status"><option value="">Any status</option>{% for s in statuses %}<option value="{{ s }}" {{ 'selected' if request.args.get('status')==s }}>{{ L.status_label(s) }}</option>{% endfor %}</select></div>
+<div><label for="fp">Service</label><select id="fp" name="service"><option value="">Any service</option>{% for s in services %}{% if s %}<option value="{{ s }}" {{ 'selected' if request.args.get('service')==s }}>{{ L.service_label(s) }}</option>{% endif %}{% endfor %}</select></div>
+<div><label for="ff">From</label><input id="ff" type="date" name="from" value="{{ request.args.get('from','') }}"></div><div><label for="ft">To</label><input id="ft" type="date" name="to" value="{{ request.args.get('to','') }}"></div>
+<div style="min-width:auto;flex:0"><button class="btn-sm">Filter</button></div><div style="min-width:auto;flex:0"><a class="btn btn-secondary btn-sm" href="{{ url_for('admin.leads') }}">Clear</a></div>
+</div></form>
+<div class="table-card"><table><tr><th>Reference</th><th>Customer</th><th>Service</th><th>Tier</th><th class="hide-sm">ZIP</th><th>Phone</th><th>Status</th><th class="hide-sm">Partner</th><th class="hide-sm">Created</th></tr>
+{% for l in pagination.items %}<tr class="rowlink" onclick="location='{{ url_for('admin.lead_detail', lead_id=l.id) }}'">
+<td><a href="{{ url_for('admin.lead_detail', lead_id=l.id) }}">{{ l.reference }}</a></td><td>{{ l.first_name }} {{ l.last_name }}</td><td>{{ L.service_label(l.service_type or l.pest_type) }}</td>
+<td><span class="badge {{ L.quality_color(l.quality) }}">{{ (l.lead_tier or 'standard')|replace('_',' ')|title }} · ${{ '%.0f'|format(l.lead_price or 40) }}</span></td><td class="hide-sm">{{ l.zip_code }}</td>
+<td>{% if l.phone_verified %}<span class="badge green">✓ SMS</span>{% else %}<span class="badge gray">—</span>{% endif %}</td><td><span class="badge {{ L.status_color(l.status) }}">{{ L.status_label(l.status) }}</span></td><td class="hide-sm">{{ l.partner.name if l.partner else '—' }}</td><td class="hide-sm muted">{{ l.created_at.strftime('%b %d, %I:%M %p') }}</td></tr>
+{% else %}<tr><td colspan="9" class="empty">No leads match these filters.</td></tr>{% endfor %}</table></div>
+{% set args = request.args.to_dict() %}{% if args.pop('page',None) %}{% endif %}<div class="pager">{% if pagination.has_prev %}<a href="{{ url_for('admin.leads', page=pagination.prev_num, **args) }}">← Previous</a>{% endif %}<span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>{% if pagination.has_next %}<a href="{{ url_for('admin.leads', page=pagination.next_num, **args) }}">Next →</a>{% endif %}</div>
+{% endblock %}

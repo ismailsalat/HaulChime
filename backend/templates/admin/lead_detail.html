@@ -1,0 +1,76 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ lead.reference }}{% endblock %}
+{% block content %}
+<div class="lead-head"><h1>{{ lead.reference }}</h1><span class="badge {{ L.status_color(lead.status) }}">{{ L.status_label(lead.status) }}</span><span class="badge {{ L.quality_color(lead.quality) }}">{{ (lead.lead_tier or 'standard')|replace('_',' ')|title }} · ${{ '%.0f'|format(lead.lead_price or 40) }}</span>{% if lead.phone_verified %}<span class="badge green">✓ Phone verified</span>{% else %}<span class="badge gray">Phone not verified</span>{% endif %}</div>
+<p class="page-sub">Submitted {{ lead.created_at.strftime('%B %d, %Y at %I:%M %p') }} · Partner: {{ lead.partner.name if lead.partner else 'Not assigned' }}</p>
+<div class="quick"><a class="btn btn-sm btn-secondary" href="tel:{{ lead.phone }}">Call</a><a class="btn btn-sm btn-secondary" href="sms:{{ lead.phone }}">Text</a>{% if lead.email %}<a class="btn btn-sm btn-secondary" href="mailto:{{ lead.email }}">Email</a>{% endif %}</div>
+{% if zip_warning %}
+<div class="card" style="border:2px solid #b54708;background:#fffaf0">
+  <h2 style="color:#b54708">Hold on — that's outside their service area</h2>
+  <p><strong>{{ zip_warning.partner }}</strong> does not list ZIP <strong>{{ zip_warning.zip }}</strong> in their coverage.</p>
+  <p class="muted small">They currently cover: {{ zip_warning.covered }}</p>
+  <p>Assign anyway only if you have agreed this job with them. Otherwise pick a different partner, or add {{ zip_warning.zip }} to their service ZIPs first.</p>
+  <form method="post" data-confirm="Assign this lead to {{ zip_warning.partner }} even though ZIP {{ zip_warning.zip }} is outside their service area?" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-top:14px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="status" value="{{ zip_warning.status }}">
+    <input type="hidden" name="qualification" value="{{ zip_warning.qualification }}">
+    <input type="hidden" name="partner_id" value="{{ zip_warning.partner_id }}">
+    <input type="hidden" name="lead_charge" value="{{ zip_warning.lead_charge }}">
+    <input type="hidden" name="admin_notes" value="{{ zip_warning.admin_notes }}">
+    <input type="hidden" name="confirm_zip_override" value="yes">
+    <button type="submit" class="btn btn-sm">Yes, assign anyway</button>
+    <a class="btn btn-sm btn-secondary" href="{{ url_for('admin.lead_detail', lead_id=lead.id) }}">Cancel</a>
+    <a class="btn btn-sm btn-secondary" href="{{ url_for('admin.partners', edit_id=zip_warning.partner_id) }}">Edit their service ZIPs</a>
+  </form>
+</div>
+{% endif %}
+<div class="fieldrow">
+  <div class="card"><h2>Customer</h2><p class="kv"><span class="k">Name</span><br><span class="v">{{ lead.first_name }} {{ lead.last_name }}</span></p><p class="kv"><span class="k">Phone</span><br><span class="v">{{ lead.phone }}</span></p><p class="kv"><span class="k">Email</span><br><span class="v">{{ lead.email or 'Not provided' }}</span></p><p class="kv"><span class="k">Preferred contact</span><br><span class="v">{{ (lead.preferred_contact or 'text')|title }} · {{ (lead.contact_time or 'anytime')|title }}</span></p></div>
+  <div class="card"><h2>Opportunity profile</h2><p class="kv"><span class="k">Tier and lead price</span><br><span class="v"><strong>{{ (lead.lead_tier or 'standard')|replace('_',' ')|title }} · ${{ '%.2f'|format(lead.lead_price or 40) }}</strong></span></p><p class="kv"><span class="k">Job scope</span><br><span class="v">Classified from the selected service and job size</span></p><p class="kv"><span class="k">Difficulty</span><br><span class="v">{{ lead.difficulty_score or 0 }}/100</span></p><p class="kv"><span class="k">Information quality</span><br><span class="v">{{ lead.information_score or 0 }}/100</span></p><p class="kv"><span class="k">Overall score</span><br><span class="v">{{ lead.score or 0 }}/100 {% if lead.billable %}<span class="badge green">Billable</span>{% endif %}</span></p></div>
+</div>
+<div class="card"><h2>Job details</h2><div class="fieldrow"><p class="kv"><span class="k">Service</span><br><span class="v">{{ L.service_label(lead.service_type or lead.pest_type) }}</span></p><p class="kv"><span class="k">Job type</span><br><span class="v">{{ L.job_type_label(lead.job_type) if lead.job_type else 'Not specified' }}</span></p><p class="kv"><span class="k">Job size</span><br><span class="v">{{ L.job_size_label(lead.job_size) }}</span></p><p class="kv"><span class="k">Timing</span><br><span class="v">{{ L.timing_label(lead.urgency) }}</span></p><p class="kv"><span class="k">Preferred date</span><br><span class="v">{{ lead.service_date or 'Not specified' }}{% if lead.preferred_time %} · {{ L.preferred_time_label(lead.preferred_time) }}{% endif %}</span></p><p class="kv"><span class="k">Property</span><br><span class="v">{{ L.property_label(lead.property_type) }}</span></p></div>{% if lead.item_categories %}<p class="kv"><span class="k">Item categories</span><br><span class="v">{{ L.item_list(lead.item_categories) }}</span></p>{% endif %}{% if lead.extra_services %}<p class="kv"><span class="k">Additional help requested</span><br><span class="v">{{ L.extra_service_list(lead.extra_services) }}</span></p>{% endif %}<p class="kv"><span class="k">Inventory</span><br><span class="v">{{ lead.inventory or '—' }}</span></p>{% if lead.special_items %}<p class="kv"><span class="k">Heavy or special items</span><br><span class="v">{{ lead.special_items }}{% if lead.special_items_note and lead.special_items_note not in lead.special_items %}<br><em>{{ lead.special_items_note }}</em>{% endif %}</span></p>{% endif %}<p class="kv"><span class="k">Additional description</span><br><span class="v">{{ lead.description }}</span></p>{% if lead.photos %}<div>{% for k in lead.photos %}<a href="/api/photos/{{ k }}" target="_blank" rel="noopener"><img class="thumb" src="/api/photos/{{ k }}" alt="Customer job photo"></a>{% endfor %}</div>{% endif %}</div>
+<div class="card"><h2>Addresses and access</h2><div class="fieldrow"><p class="kv"><span class="k">Pickup {% if lead.address_verified %}<span class="badge green">Address verified</span>{% else %}<span class="badge gray">Not verified</span>{% endif %}</span><br><span class="v">{{ lead.pickup_address }}{% if lead.pickup_unit %} {{ lead.pickup_unit }}{% endif %}<br>{{ lead.city or '' }}{% if lead.pickup_state %}, {{ lead.pickup_state }}{% endif %} {{ lead.zip_code }}</span></p><p class="kv"><span class="k">Destination</span><br><span class="v">{% if lead.destination_address %}{{ lead.destination_address }}{% if lead.destination_unit %} {{ lead.destination_unit }}{% endif %}<br>{{ lead.destination_city or '' }} {{ lead.destination_zip or '' }}{% elif lead.destination_zip %}Exact address not known yet<br>{{ lead.destination_city or '' }} {{ lead.destination_zip }}{% else %}Not required{% endif %}</span></p></div><div class="fieldrow"><p class="kv"><span class="k">Access at pickup</span><br><span class="v">{{ L.access_list(lead.access_issues) or (lead.pickup_access or '—')|replace('_',' ')|capitalize }}{% if lead.stairs_flights %} · {{ L.flight_label(lead.stairs_flights) }}{% endif %}</span></p><p class="kv"><span class="k">Access at destination</span><br><span class="v">{{ L.access_list(lead.destination_access_issues) or (lead.destination_access or '—')|replace('_',' ')|capitalize }}{% if lead.destination_stairs_flights %} · {{ L.flight_label(lead.destination_stairs_flights) }}{% endif %}</span></p></div></div>
+{% if lead.cost_breakdown %}{% set c=lead.cost_breakdown|fromjson %}
+<div class="card" style="border:2px solid #b42318">
+  <h2>Internal job economics <span class="badge red">Admin only</span></h2>
+  <p class="hint"><strong>Never shown or quoted to the customer.</strong> HaulChime does not price jobs &mdash; the partner inspects the work and agrees the price directly with the customer. This is a planning figure so you can decide what this lead is worth.</p>
+  <div class="grid">
+    <div class="stat"><span class="k">Estimated job value</span><b>${{ '%.0f'|format(c.get('estimated_job_value',0)) }}</b></div>
+    <div class="stat"><span class="k">Likely range</span><b>${{ '%.0f'|format(c.get('estimated_range_low',0)) }}&ndash;${{ '%.0f'|format(c.get('estimated_range_high',0)) }}</b></div>
+    <div class="stat"><span class="k">Est. cost to run</span><b>${{ '%.0f'|format(c.get('total_cost',0)) }}</b></div>
+    <div class="stat"><span class="k">Est. gross profit</span><b>${{ '%.0f'|format(c.get('estimated_profit',0)) }}</b></div>
+    <div class="stat"><span class="k">Confidence</span><b>{{ (c.get('confidence','low'))|capitalize }}</b></div>
+  </div>
+  <h3 style="margin-top:22px;font-size:1rem">Where the cost comes from</h3>
+  <div class="fieldrow">
+    <p class="kv"><span class="k">Labor</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('labor',0)) }} &middot; {{ c.get('crew_size',0) }} crew &times; {{ c.get('paid_crew_hours',0) }} paid crew-hours</span></p>
+    <p class="kv"><span class="k">Fuel</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('fuel',0)) }} &middot; {{ c.get('total_miles',0) }} mi</span></p>
+    <p class="kv"><span class="k">Vehicle wear</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('vehicle',0)) }}</span></p>
+    <p class="kv"><span class="k">Disposal / tipping</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('disposal',0)) }}{% if c.get('involves_disposal') %} &middot; ~{{ c.get('estimated_weight_lbs',0) }} lb{% else %} &middot; no dump run{% endif %}</span></p>
+    <p class="kv"><span class="k">Special equipment</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('special_equipment',0)) }}</span></p>
+    <p class="kv"><span class="k">Materials</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('materials',0)) }}</span></p>
+    <p class="kv"><span class="k">Overhead</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('overhead',0)) }}</span></p>
+    <p class="kv"><span class="k">Target margin</span><br><span class="v">{{ c.get('target_margin_pct',0) }}%</span></p>
+  </div>
+  <p class="hint">Distance basis: {{ (c.get('distance_basis','') or 'default')|replace('_',' ') }} &middot; {{ c.get('distance_miles',0) }} mi loaded. {% if c.get('unknown_answers',0) %}{{ c.get('unknown_answers') }} question(s) answered "not sure", so the range is widened.{% endif %}</p>
+</div>
+{% endif %}
+{% if lead.score_breakdown %}{% set b=lead.score_breakdown|fromjson %}<div class="card"><h2>Algorithm breakdown</h2><div class="grid"><div class="stat"><span class="k">Job scope</span><b>{{ b.get('scope',0) }}</b></div><div class="stat"><span class="k">Difficulty</span><b>{{ b.get('difficulty',0) }}</b></div><div class="stat"><span class="k">Information</span><b>{{ b.get('information',0) }}</b></div><div class="stat"><span class="k">Intent</span><b>{{ b.get('intent',0) }}</b></div><div class="stat"><span class="k">Penalties</span><b>{{ b.get('penalties',0) }}</b></div></div><p class="hint">Difficulty is scored separately so a difficult small job does not automatically become Premium.</p></div>{% endif %}
+<div class="card"><h2>Send this lead to the partner</h2>
+{% if lead.partner %}
+  <p class="muted small">Goes to <strong>{{ lead.partner.name }}</strong> &mdash; email {{ lead.partner.notification_email or lead.partner.email or 'not set' }}, text {{ lead.partner.phone or 'not set' }}. The text is short and carries no street address; the full detail is in the email.</p>
+  <form method="post" action="{{ url_for('admin.send_lead', lead_id=lead.id) }}" data-confirm="Send lead {{ lead.reference }} to {{ lead.partner.name }} now? This contacts them for real.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label class="checkline"><input type="checkbox" name="email" checked {{ 'disabled' if not (lead.partner.notification_email or lead.partner.email) }}> Email{% if not (lead.partner.notification_email or lead.partner.email) %} <span class="muted small">(no address on file)</span>{% endif %}</label>
+    <label class="checkline"><input type="checkbox" name="sms" {{ 'disabled' if not lead.partner.phone }}> Text message{% if not lead.partner.phone %} <span class="muted small">(no number on file)</span>{% endif %}</label>
+    <button type="submit" class="btn">Send now</button>
+  </form>
+{% else %}
+  <p class="muted">Assign a partner below first, then send.</p>
+{% endif %}
+</div>
+<div class="card"><h2>Admin decision</h2><form method="post" data-warn-unsaved="1" data-confirm="Save these changes to lead {{ lead.reference }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="fieldrow"><div><label>Status</label><select name="status">{% for s in statuses %}<option value="{{ s }}" {{ 'selected' if lead.status==s }}>{{ L.status_label(s) }}</option>{% endfor %}</select></div><div><label>Qualification</label><select name="qualification">{% for q in qualifications %}<option value="{{ q }}" {{ 'selected' if lead.qualification==q }}>{{ L.QUALIFICATION_META[q][0] }}</option>{% endfor %}</select></div><div><label>Assigned partner</label><select name="partner_id"><option value="">Unassigned</option>{% for p in partners %}<option value="{{ p.id }}" {{ 'selected' if lead.partner_id==p.id }}>{{ p.name }} · ${{ '%.2f'|format(p.credit_balance or 0) }} credit</option>{% endfor %}</select></div><div><label>Price charged ($)</label><input name="lead_charge" inputmode="decimal" value="{{ lead.lead_charge or lead.lead_price or '' }}"></div></div><label>Admin notes</label><textarea name="admin_notes" rows="3">{{ lead.admin_notes or '' }}</textarea><button type="submit">Save lead</button></form></div>
+<div class="card" style="border-color:#f2b8b5"><h2>Danger zone</h2><p class="muted small">Deleting removes the lead, its photos and its activity history for good. If you only want it out of the way, set the status to Invalid instead.</p><form method="post" action="{{ url_for('admin.delete_lead', lead_id=lead.id) }}" data-confirm="Permanently delete lead {{ lead.reference }}, its photos and its whole history? This cannot be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="linkbtn danger">Delete this lead permanently</button></form></div>
+<div class="card"><h2>Consent and attribution</h2><p class="muted small">{{ lead.consent_text }}</p><p class="muted small">Agreed at {{ lead.consent_timestamp }}</p><div class="fieldrow"><p class="kv"><span class="k">Source</span><br><span class="v">{{ lead.utm_source or 'Direct' }}</span></p><p class="kv"><span class="k">Landing page</span><br><span class="v">{{ lead.landing_page or '—' }}</span></p></div></div>
+<div class="card"><h2>Activity history</h2>{% if timeline %}<ul class="timeline">{% for a in timeline %}<li class="{{ a.event_status if a.event_status != 'ok' }}"><time>{{ a.created_at.strftime('%b %d, %I:%M %p') }}</time>{{ L.event_label(a.event_type) }}{% if a.new_value %}: {{ a.new_value }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="empty">No activity recorded.</p>{% endif %}</div>
+{% endblock %}

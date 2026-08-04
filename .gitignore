@@ -1,0 +1,32 @@
+# ---- Secrets. Never commit these. ----
+backend/.env
+.env
+*.pem
+*.key
+
+# ---- Local database and uploads (production uses Postgres + a volume/bucket) ----
+backend/leads.db
+backend/*.db
+backend/uploads/*
+!backend/uploads/.gitkeep
+
+# ---- Virtualenvs and caches ----
+backend/.venv/
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+
+# ---- Node / build output ----
+node_modules/
+frontend/dist/
+frontend/site.local.json
+
+# ---- Editors and OS ----
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp

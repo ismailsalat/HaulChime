@@ -1,0 +1,73 @@
+{% extends "admin/base.html" %}
+{% block title %}Settings{% endblock %}
+{% block content %}
+<h1>Settings</h1>
+<p class="page-sub">Configuration overview. Values are managed as environment variables on your Railway service — secrets are never shown here.</p>
+
+<div class="card">
+  <h2>General</h2>
+  <div class="fieldrow">
+    {% for k, v in general %}
+    <p class="kv"><span class="k">{{ k }}</span><br><span class="v">{{ v }}</span></p>
+    {% endfor %}
+  </div>
+</div>
+
+<div class="card">
+  <h2>Integrations</h2>
+  {% for name, connected in integrations %}
+  <p class="kv"><span class="v">{{ name }}</span>
+    {% if connected %}<span class="badge green">Connected</span>{% else %}<span class="badge gray">Not connected</span>{% endif %}</p>
+  {% endfor %}
+  <p class="hint">To connect an integration, set its environment variables on Railway (see backend/.env.example) and redeploy.</p>
+</div>
+
+<div class="card">
+  <h2>Phone verification (last 30 days)</h2>
+  <div class="grid">
+    <div class="stat"><span class="k">Codes sent</span><b>{{ sms.sent }}</b><span class="hint">{{ sms.today_sent }} today of {{ sms.daily_limit }} allowed</span></div>
+    <div class="stat"><span class="k">Verified</span><b>{{ sms.verified }}</b></div>
+    <div class="stat"><span class="k">Completion rate</span><b>{% if sms.completion_rate is not none %}{{ sms.completion_rate }}%{% else %}—{% endif %}</b><span class="hint">verified ÷ sent</span></div>
+    <div class="stat"><span class="k">SMS per verified</span><b>{{ sms.sms_per_verified or '—' }}</b></div>
+    <div class="stat"><span class="k">Cost per verified</span><b>{% if sms.cost_per_verified %}${{ '%.4f' % sms.cost_per_verified }}{% else %}—{% endif %}</b></div>
+    <div class="stat"><span class="k">Total SMS cost</span><b>${{ '%.4f' % sms.cost }}</b></div>
+  </div>
+  <p class="muted small">Delivered {{ sms.delivered }} · Failed {{ sms.failed }} · Blocked requests {{ sms.blocked }} · Expired {{ sms.expired }}</p>
+  <p class="hint">To stop all SMS immediately during an incident, set <code>PHONE_VERIFICATION_ENABLED=false</code> on Railway and redeploy.</p>
+</div>
+
+<div class="card">
+  <h2>Storage &amp; persistence</h2>
+  <p class="kv"><span class="k">Database</span>
+    {% if storage.db_persistent %}<span class="badge green">{{ storage.db_label }}</span>{% else %}<span class="badge yellow">{{ storage.db_label }}</span>{% endif %}
+    <span class="v"> · {{ storage.lead_count }} leads stored</span></p>
+  <p class="kv"><span class="k">Uploaded photos</span>
+    {% if storage.photos_persistent %}<span class="badge green">{{ storage.photos_label }}</span>{% else %}<span class="badge yellow">{{ storage.photos_label }}</span>{% endif %}</p>
+  {% if not storage.db_persistent %}
+  <p class="hint"><strong>Heads up:</strong> you're on a local SQLite file. On Railway this lives inside the container and is <strong>wiped on every redeploy</strong>. To keep leads permanently, add a PostgreSQL database in Railway and set <code>DATABASE_URL=${{ '{{' }}Postgres.DATABASE_URL{{ '}}' }}</code> on the backend service, then redeploy. Until then, download a backup below before any redeploy.</p>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>Backup &amp; restore</h2>
+  <p class="muted small">A backup is a single JSON file containing every lead, partner and activity record. Download one regularly (and always before a redeploy on ephemeral storage). Restoring is additive — existing leads and partners are kept, not overwritten.</p>
+  <p>
+    <a class="btn btn-sm" href="{{ url_for('admin.backup_json') }}">Download full backup (JSON)</a>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('admin.export_csv') }}">Export leads (CSV)</a>
+    <a class="btn btn-secondary btn-sm" href="{{ url_for('admin.logs', export='csv') }}">Export audit log (CSV)</a>
+  </p>
+  <form method="post" action="{{ url_for('admin.import_data') }}" enctype="multipart/form-data" style="margin-top:14px"
+        data-confirm="Import leads and partners from this backup file? Existing records are kept; only new ones are added." >
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="backup">Restore from a backup file</label>
+    <input id="backup" type="file" name="backup" accept="application/json,.json" required>
+    <p><button class="btn-sm" type="submit">Import backup</button></p>
+    <p class="hint">CSV is for spreadsheets and is not restorable. Use the JSON backup to move or recover your data.</p>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Audit &amp; retention</h2>
+  <p class="hint">Audit records are append-only and kept forever by default. Retention is controlled by the AUDIT_RETENTION_DAYS variable and the retention.py script — see backend/LOGGING.md.</p>
+</div>
+{% endblock %}

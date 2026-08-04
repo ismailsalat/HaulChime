@@ -1,0 +1,5 @@
+Subject: Reminder: lead {reference} still awaiting an update
+Lead {reference} ({pest_type}, {zip_code}) has not had a status update.
+
+Please check whether the customer was contacted and update the record:
+{site_url}/admin

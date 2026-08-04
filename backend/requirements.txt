@@ -1,0 +1,16 @@
+Flask==3.0.3
+Flask-SQLAlchemy==3.1.1
+python-dotenv==1.0.1
+Pillow==10.4.0
+Werkzeug==3.0.4
+pytest==8.3.3
+
+gunicorn==22.0.0
+psycopg[binary]==3.2.1
+phonenumbers==8.13.45
+PyNaCl==1.5.0
+messagebird-sdk==0.11.0
+
+# Only needed when STORAGE_BACKEND=s3 (Cloudflare R2, Backblaze B2, AWS S3).
+# Harmless to install either way; the local backend never imports it.
+boto3==1.35.36

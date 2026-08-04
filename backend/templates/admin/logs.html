@@ -1,0 +1,95 @@
+{% extends "admin/base.html" %}
+{% block title %}Activity & Logs{% endblock %}
+{% block content %}
+<h1>Activity &amp; Logs</h1>
+<p class="page-sub">Everything that happens in the system, newest first.</p>
+
+<div class="tabs">
+  <a class="{{ 'active' if tab != 'dev' }}" href="{{ url_for('admin.logs', tab='activity') }}">Activity</a>
+  <a class="{{ 'active' if tab == 'dev' }}" href="{{ url_for('admin.logs', tab='dev') }}">Developer logs</a>
+</div>
+
+<form method="get" class="filters">
+  <input type="hidden" name="tab" value="{{ tab }}">
+  <div><label>Lead ID</label><input name="lead" placeholder="HC-…" value="{{ request.args.get('lead','') }}"></div>
+  <div><label>Status</label>
+    <select name="status"><option value="">Any</option>
+      {% for raw, meta in L.EVENT_STATUS_META.items() %}<option value="{{ raw }}" {{ 'selected' if request.args.get('status')==raw }}>{{ meta[0] }}</option>{% endfor %}
+    </select></div>
+  <div><label>From</label><input type="date" name="from" value="{{ request.args.get('from','') }}"></div>
+  <div><label>To</label><input type="date" name="to" value="{{ request.args.get('to','') }}"></div>
+  <div style="min-width:auto; flex:0; align-self:end"><label style="display:flex; gap:6px; align-items:center; margin:0"><input type="checkbox" name="errors_only" value="1" style="width:auto" {{ 'checked' if request.args.get('errors_only') }}> Errors only</label></div>
+  <div style="min-width:auto; flex:0"><button class="btn-sm">Filter</button></div>
+  <div style="min-width:auto; flex:0"><a class="btn btn-secondary btn-sm" href="{{ url_for('admin.logs', tab=tab) }}">Clear</a></div>
+</form>
+<details class="adv"><summary>Advanced filters</summary>
+  <form method="get" class="filters" style="margin-top:10px">
+    <input type="hidden" name="tab" value="{{ tab }}">
+    <div><label>Request ID</label><input name="request_id" placeholder="req_…" value="{{ request.args.get('request_id','') }}"></div>
+    {% if tab == 'dev' %}
+    <div><label>Raw event name</label>
+      <select name="event"><option value="">All events</option>
+        {% for e in event_types %}<option value="{{ e }}" {{ 'selected' if request.args.get('event')==e }}>{{ e }}</option>{% endfor %}
+      </select></div>
+    {% endif %}
+    <div><label>Performed by</label>
+      <select name="actor"><option value="">Anyone</option>
+        {% for a in ['customer','admin','contractor','system'] %}<option {{ 'selected' if request.args.get('actor')==a }}>{{ a }}</option>{% endfor %}
+      </select></div>
+    <div style="min-width:auto; flex:0"><button class="btn-sm">Apply</button></div>
+    <div style="min-width:auto; flex:0"><a class="btn btn-secondary btn-sm" href="{% set xargs = request.args.to_dict() %}{% if xargs.update({'tab': tab, 'export': 'csv'}) %}{% endif %}{{ url_for('admin.logs', **xargs) }}">Export CSV</a></div>
+  </form>
+</details>
+
+<div class="table-card">
+{% if tab != 'dev' %}
+<table>
+  <tr><th>Time</th><th>Activity</th><th>Status</th><th>Lead</th><th class="hide-sm">Performed by</th></tr>
+  {% for a in pagination.items %}
+  <tr>
+    <td class="muted small">{{ a.created_at.strftime('%b %d, %I:%M %p') }}</td>
+    <td>{{ L.event_label(a.event_type) }}
+      {% if a.previous_value or a.new_value %}<br><span class="muted small">{{ a.previous_value or '—' }} → {{ a.new_value or '—' }}</span>{% endif %}</td>
+    <td><span class="badge {{ L.EVENT_STATUS_META.get(a.event_status, ('', 'gray'))[1] }}">{{ L.EVENT_STATUS_META.get(a.event_status, (a.event_status, ''))[0] }}</span></td>
+    <td>{% if a.lead_id %}<a href="{{ url_for('admin.lead_detail', lead_id=a.lead_id) }}">{{ a.lead_reference }}</a>{% else %}—{% endif %}</td>
+    <td class="hide-sm muted">{{ 'System' if a.actor_type == 'system' else a.actor_type|capitalize }}{% if a.actor_id %} ({{ a.actor_id }}){% endif %}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="5" class="empty">No activity was found for these filters.</td></tr>
+  {% endfor %}
+</table>
+{% else %}
+<table>
+  <tr><th>Time</th><th>Event</th><th>Status</th><th>Lead</th><th class="hide-sm">Actor</th><th class="hide-sm">Request ID</th></tr>
+  {% for a in pagination.items %}
+  <tr>
+    <td class="muted small">{{ a.created_at.strftime('%m/%d %H:%M:%S') }}</td>
+    <td><code>{{ a.event_type }}</code>
+      {% if a.metadata_json or a.previous_value or a.new_value %}
+      <details><summary class="muted small">Details</summary>
+        <pre style="background:var(--bg); border:1px solid var(--line); border-radius:8px; padding:10px; font-size:12px; overflow:auto">activity_id: {{ a.activity_id }}{% if a.previous_value or a.new_value %}
+change: {{ a.previous_value or '—' }} → {{ a.new_value or '—' }}{% endif %}{% if a.metadata_json %}
+metadata: {{ a.metadata_json }}{% endif %}</pre>
+        <button type="button" class="btn btn-secondary btn-sm" onclick="navigator.clipboard.writeText('{{ a.request_id or '' }}')">Copy request ID</button>
+      </details>
+      {% endif %}
+    </td>
+    <td><span class="badge {{ L.EVENT_STATUS_META.get(a.event_status, ('', 'gray'))[1] }}">{{ a.event_status }}</span></td>
+    <td>{% if a.lead_id %}<a href="{{ url_for('admin.lead_detail', lead_id=a.lead_id) }}">{{ a.lead_reference }}</a>{% else %}—{% endif %}</td>
+    <td class="hide-sm muted small">{{ a.actor_type }}{% if a.actor_id %}:{{ a.actor_id }}{% endif %}</td>
+    <td class="hide-sm muted small">{{ a.request_id or '—' }}</td>
+  </tr>
+  {% else %}
+  <tr><td colspan="6" class="empty">No activity was found for these filters.</td></tr>
+  {% endfor %}
+</table>
+{% endif %}
+</div>
+
+{% set args = request.args.to_dict() %}{% if args.pop('page', None) %}{% endif %}
+<div class="pager">
+  {% if pagination.has_prev %}<a href="{{ url_for('admin.logs', page=pagination.prev_num, **args) }}">← Newer</a>{% endif %}
+  <span>Page {{ pagination.page }} of {{ pagination.pages or 1 }}</span>
+  {% if pagination.has_next %}<a href="{{ url_for('admin.logs', page=pagination.next_num, **args) }}">Older →</a>{% endif %}
+</div>
+{% endblock %}

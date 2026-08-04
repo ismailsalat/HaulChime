@@ -1,0 +1,24 @@
+Subject: Thank you — your {brand} request is in ({reference})
+
+Hi {first_name},
+
+Thank you! Your {service_type} request has been received, and one of our
+local service partners will be in touch with you shortly to discuss the job
+and give you a quote.
+
+Most customers hear back the same day. Keep an eye on your phone — they will
+reach out by {contact_method}.
+
+Your request
+  Reference:        {reference}
+  Service:          {service_type}
+  Pickup ZIP:       {zip_code}
+  Job size:         {job_size}
+  Contact number:   {phone}
+  Preferred method: {contact_method}
+
+Nothing is owed and nothing is booked yet. The partner will confirm the
+details, the schedule and the price directly with you.
+
+{brand} is a referral service. We connect you with independent local
+providers; we do not perform the work and we do not set the price.
