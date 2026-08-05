@@ -4,7 +4,11 @@ const fs = require('fs');
 const path = require('path');
 
 let local = {};
-try { local = require('./site.local.json'); } catch (_) {}
+// `node build.js --prod` reads site.prod.json (committed, public URLs only).
+// Without the flag it reads site.local.json (gitignored, your machine).
+// Railway sets API_URL / SITE_URL instead; env vars win over both.
+const isProd = process.argv.includes('--prod');
+try { local = require(isProd ? './site.prod.json' : './site.local.json'); } catch (_) {}
 
 const SITE = {
   name: process.env.SITE_NAME || local.name || 'HaulChime',

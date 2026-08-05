@@ -30,3 +30,7 @@ Thumbs.db
 .idea/
 .vscode/
 *.swp
+
+# ---- Firebase Hosting ----
+.firebase/
+firebase-debug.log

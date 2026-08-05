@@ -5,6 +5,8 @@
   "description": "HaulChime static marketing site and quote form.",
   "scripts": {
     "build": "node build.js",
-    "start": "node build.js && node server.js"
+    "start": "node build.js && node server.js",
+    "build:prod": "node build.js --prod",
+    "deploy": "node build.js --prod && firebase deploy --only hosting"
   }
 }

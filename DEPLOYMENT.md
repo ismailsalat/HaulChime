@@ -110,32 +110,35 @@ uses it locally.
 
 ---
 
-## 3. Photo storage — pick one
+## 3. Photo storage — do this before you take real leads
 
 Railway's container filesystem is **ephemeral**. Anything written to
-`backend/uploads/` disappears on the next deploy. Customer photos need real
-storage.
+`backend/uploads/` disappears on the next deploy. The Postgres service already
+has `postgres-volume`, but that belongs to Postgres — the API service has no
+storage of its own until you give it some.
 
-### Option A — Railway Volume (simplest)
+Until this is done, customer photos are lost every time you push.
 
-1. On the API service: **Settings → Volumes → New Volume**, mount path `/data`.
-2. Add variables:
+### Option A — Railway Volume (do this now, it takes a minute)
+
+1. API service → **Settings → Volumes → New Volume**, mount path `/data`.
+2. Variables → add:
    ```
    STORAGE_BACKEND=local
    UPLOAD_DIR=/data/uploads
    ```
 
-Done. Good for a single service. The catch: a volume attaches to one service,
-so you can't scale to multiple instances, and backups are yours to arrange.
+Fine for one service. The limit is that a volume attaches to a single service,
+so you can't scale horizontally later, and backups are yours to arrange.
 
-### Option B — Cloudflare R2 (recommended once you have real volume)
+### Option B — Cloudflare R2 (better once volume grows)
 
-R2 has no egress fees, which matters when partners are opening photos all day.
+No egress fees, which matters when partners open photos all day.
 
-1. Cloudflare dashboard → **R2 → Create bucket** (e.g. `haulchime-photos`).
-   **Leave it private.** Do not enable public access.
-2. **Manage R2 API Tokens → Create** with Object Read & Write on that bucket.
-3. Add variables on Railway:
+1. Cloudflare → **R2 → Create bucket** (`haulchime-photos`). **Leave it
+   private.** Do not enable public access.
+2. **Manage R2 API Tokens → Create**, Object Read & Write on that bucket.
+3. Railway variables:
    ```
    STORAGE_BACKEND=s3
    S3_BUCKET=haulchime-photos
@@ -145,145 +148,118 @@ R2 has no egress fees, which matters when partners are opening photos all day.
    S3_SECRET_ACCESS_KEY=...
    ```
 
-The code never makes an object public. `/api/photos/<key>` issues a pre-signed
-URL that expires after 15 minutes (`S3_URL_EXPIRY_SECONDS`). These photos show
-the inside of customers' homes next to their addresses — a public bucket here
-is a privacy incident waiting to happen, and the same settings work unchanged
-for AWS S3 or Backblaze B2 if you'd rather use those.
+The code never makes an object public. `/api/photos/<key>` redirects to a
+pre-signed URL that expires in 15 minutes. These photos show the inside of
+customers' homes next to their addresses; a public bucket here is a privacy
+incident waiting to happen. Same settings work for AWS S3 and Backblaze B2.
 
 ---
 
-## 4. Deploy the static site
+## 4. Deploy the static site as a second Railway service
 
-The frontend is plain HTML/CSS/JS built by `node build.js`. Any static host
-works. Two good options:
+The repo is set up for two services in one project. The root `railway.json`
+builds the backend; `frontend/railway.json` builds the site.
 
-### Cloudflare Pages
-- Connect the repo.
-- **Build command:** `cd frontend && node build.js`
-- **Output directory:** `frontend/dist`
-- **Environment variable:** none needed, but see the API URL note below.
+1. In the same Railway project: **New → GitHub Repo →** pick `HaulChime`
+   again. You now have a second service from the same repo.
+2. On that new service: **Settings → Root Directory** → `frontend`.
+   Railway then reads `frontend/railway.json`, runs `node build.js`, and
+   serves `dist/` with `server.js`.
+3. **Variables** on the frontend service:
 
-### Railway (second service, same project)
-- **New → GitHub Repo →** same repo, then **Settings → Root Directory:**
-  `frontend`, **Start command:** `npm start`.
+   ```
+   API_URL=https://api.haulchime.com
+   SITE_URL=https://haulchime.com
+   PUBLIC_EMAIL=hello@haulchime.com
+   PUBLIC_REGION=South King County, WA
+   ```
 
-### Pointing the site at the API
+   `build.js` reads these at build time and bakes `window.HAULCHIME_API` into
+   every page. `site.local.json` is your local-only file and is gitignored, so
+   without `API_URL` set here the deployed site would fall back to
+   `http://localhost:5002` and every quote submission would fail.
 
-`frontend/site.local.json` is gitignored (it's your local config). For the
-build to bake in the production API URL, either commit a
-`frontend/site.prod.json` and switch `build.js` to read it, or simpler — set
-these before the build:
+4. **Settings → Networking → Custom Domain** → add `haulchime.com`, then add
+   `www.haulchime.com`. Railway gives you a CNAME target for each — copy both.
 
-```json
-{
-  "domain": "https://yourdomain.com",
-  "apiUrl": "https://api.yourdomain.com",
-  "email": "hello@yourdomain.com"
-}
-```
-
-Whatever `apiUrl` ends up as **must** appear in the API's `ALLOWED_ORIGINS`,
-and vice versa.
+> Changing `API_URL` requires a **redeploy**, not just a restart. The value is
+> compiled into the HTML at build time.
 
 ---
 
-## 5. Domain and DNS on Namecheap
+## 5. Namecheap DNS
 
-Give the API its own subdomain. Serving both from one hostname means a
-frontend deploy can take the API down with it.
+`api.haulchime.com` is already done and verified. Two records remain, both
+pointing at the **frontend** service.
 
-| Host | Points at |
-|---|---|
-| `yourdomain.com` (apex) | static site |
-| `www.yourdomain.com` | static site |
-| `api.yourdomain.com` | Railway API service |
+Namecheap → **Domain List → Manage → Advanced DNS**.
 
-### Step 1 — get the targets from Railway
-
-On the **API service**: **Settings → Networking → Custom Domain** → enter
-`api.yourdomain.com`. Railway shows a CNAME target that looks like
-`xxxxx.up.railway.app`. Copy it.
-
-Do the same on the static-site service for `www.yourdomain.com` (and the apex,
-if that host supports it).
-
-### Step 2 — open Namecheap's Advanced DNS
-
-Namecheap dashboard → **Domain List** → **Manage** next to your domain →
-**Advanced DNS** tab.
-
-Make sure **Nameservers** (on the Domain tab) is set to **Namecheap BasicDNS**.
-If you've pointed the nameservers at Cloudflare or anywhere else, the records
-below have to be created *there* instead — Namecheap's Advanced DNS tab will
-be ignored.
-
-### Step 3 — delete the parking records
+### First, delete the parking records
 
 A fresh Namecheap domain ships with two records that will fight yours:
 
-- a `CNAME` on host `www` pointing at `parkingpage.namecheap.com`
-- a `URL Redirect Record` on host `@`
+- `CNAME` on host `www` → `parkingpage.namecheap.com`
+- `URL Redirect Record` on host `@`
 
-**Delete both.** Leaving them is the single most common reason a new Namecheap
-domain keeps showing the parking page after everything else is correct.
+Delete both. Leaving them is the most common reason a domain keeps showing the
+parking page after everything else is correct.
 
-### Step 4 — add your records
-
-Click **Add New Record** for each:
+### Then add
 
 | Type | Host | Value | TTL |
 |---|---|---|---|
-| `ALIAS Record` | `@` | the static site's target | Automatic |
-| `CNAME Record` | `www` | the static site's target | Automatic |
-| `CNAME Record` | `api` | `xxxxx.up.railway.app` | Automatic |
+| `ALIAS Record` | `@` | frontend target from Railway | Automatic |
+| `CNAME Record` | `www` | frontend target from Railway | Automatic |
 
-Notes that save time:
+Your existing `api` CNAME stays exactly as it is.
 
-- **Host is the subdomain only.** Type `api`, not `api.yourdomain.com` —
-  Namecheap appends the domain for you. Entering the full name gives you
-  `api.yourdomain.com.yourdomain.com`.
-- **`@` means the apex.** A plain CNAME is illegal at the apex under the DNS
-  spec, which is why Namecheap provides **ALIAS Record** — pick that type, not
-  CNAME. If your host only gives you an IP address, use an `A Record` instead.
-- **No trailing dot** in the value. Namecheap handles that.
-- If you'd rather not run the apex at all, replace the ALIAS with a
-  **URL Redirect Record** on `@` → `https://www.yourdomain.com`, permanent
-  (301). Then `www` is your canonical site.
+Things that cost people an hour:
 
-### Step 5 — wait, then verify
+- **Host is the subdomain only.** `www`, not `www.haulchime.com` — Namecheap
+  appends the domain, so the full name gives you
+  `www.haulchime.com.haulchime.com`.
+- **`@` needs ALIAS, not CNAME.** A plain CNAME at the apex is illegal under
+  the DNS spec; Namecheap's ALIAS Record exists for exactly this.
+- **No trailing dot** in the value.
+- Nameservers (Domain tab) must be **Namecheap BasicDNS**. If they point at
+  Cloudflare, the Advanced DNS tab is ignored and the records belong there
+  instead.
 
-Namecheap usually propagates in a few minutes but says up to 30. Railway
-issues the TLS certificate automatically once it can see the record — the
-custom-domain row turns green.
+If you'd rather not run the apex, replace the ALIAS with a **URL Redirect
+Record** on `@` → `https://www.haulchime.com`, permanent (301), and make `www`
+canonical.
 
-Check from a terminal:
+### Verify
 
 ```bash
-dig +short api.yourdomain.com          # should show the railway.app target
-curl -sI https://api.yourdomain.com/api/config | head -1   # HTTP/2 200
+dig +short haulchime.com
+dig +short www.haulchime.com
+curl -sI https://haulchime.com | head -1              # HTTP/2 200
+curl -s https://api.haulchime.com/api/config | head   # JSON, not an error
 ```
 
-If `dig` is empty after 30 minutes, the record didn't save or the nameservers
-aren't Namecheap's. If `dig` resolves but `curl` fails with a certificate
-error, give Railway another few minutes — it can't issue a certificate until
-DNS resolves.
+Railway issues certificates automatically once DNS resolves; the domain row
+turns green. Empty `dig` after 30 minutes means the record didn't save or the
+nameservers aren't Namecheap's.
 
-### Step 6 — update the app to match
+---
 
-On Railway (API service):
+## 5b. Point the API back at the site
+
+Once the domains resolve, set these on the **API** service and redeploy:
 
 ```
-SITE_URL=https://yourdomain.com
-ALLOWED_ORIGINS=https://yourdomain.com,https://www.yourdomain.com
+SITE_URL=https://haulchime.com
+ALLOWED_ORIGINS=https://haulchime.com,https://www.haulchime.com
 ```
 
-Then rebuild the frontend with `apiUrl` set to `https://api.yourdomain.com`.
+`ALLOWED_ORIGINS` is the CORS allowlist and it must match the browser's origin
+**exactly** — scheme included, no trailing slash, and `www` listed separately
+because a browser treats it as a different origin. If the quote form fails
+after go-live with nothing in the server logs, this is almost always why: open
+the browser console and look for a CORS error.
 
-These two have to agree exactly. `ALLOWED_ORIGINS` is the CORS allowlist, and
-a trailing slash or a missing `www` will make every quote submission fail with
-a browser console error and nothing in the server logs. If the form breaks
-right after go-live, check this first.
+---
 
 ## 6. Go-live checklist
 
