@@ -13,8 +13,14 @@
   .shell{max-width:720px;margin:0 auto;padding:0 16px}
   header.bar{background:#fff;border-bottom:1px solid var(--line);padding:14px 0;position:sticky;top:0;z-index:20}
   header.bar .shell{display:flex;align-items:center;justify-content:space-between;gap:12px}
-  .brand{font-weight:950;letter-spacing:-.02em;font-size:1.05rem;text-decoration:none;color:var(--ink)}
-  .brand small{display:block;font-weight:700;font-size:.7rem;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  .brand{display:flex;align-items:center;gap:10px;text-decoration:none;color:var(--ink);min-width:0}
+  .brand-mark{flex:0 0 auto;width:32px;height:32px;border-radius:9px;background:var(--orange);
+    color:#fff;display:grid;place-items:center}
+  .brand-mark svg{width:20px;height:20px}
+  .brand-text{font-weight:950;letter-spacing:-.02em;font-size:1.05rem;line-height:1.1}
+  .brand-text em{font-style:normal;color:var(--orange)}
+  .brand-text small{display:block;font-weight:700;font-size:.66rem;color:var(--muted);
+    letter-spacing:.07em;text-transform:uppercase;margin-top:1px}
   nav.tabs{background:#fff;border-bottom:1px solid var(--line);overflow-x:auto;-webkit-overflow-scrolling:touch}
   nav.tabs .shell{display:flex;gap:4px;padding:0 8px}
   nav.tabs a{flex:1 0 auto;text-align:center;padding:13px 14px;font-weight:800;font-size:.85rem;
@@ -81,7 +87,9 @@
 </style>
 </head><body>
 <header class="bar"><div class="shell">
-  <a class="brand" href="{{ url_for('partner.home') }}">HaulChime<small>Partner portal</small></a>
+  <a class="brand" href="{{ url_for('partner.home') if partner else url_for('partner.login') }}">
+    <span class="brand-mark" aria-hidden="true"><svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><path d="M7 12h23v20H7z"/><path d="M30 20h7l5 7v5H30z"/><circle cx="16" cy="35" r="4"/><circle cx="35" cy="35" r="4"/><path d="M11 8h19"/></svg></span>
+    <span class="brand-text">Haul<em>Chime</em><small>Partner portal</small></span></a>
   {% if partner %}<a class="small" href="{{ url_for('partner.logout') }}">Sign out</a>{% endif %}
 </div></header>
 {% if partner %}

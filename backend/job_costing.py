@@ -156,18 +156,29 @@ CATEGORY_DISPOSAL_SURCHARGE = {
     "construction_debris": 55.0,
 }
 
-# Extra crew-hours and equipment cost for items that need special handling.
+# Special items cost TIME, and sometimes gear. The two are separate on purpose.
+#   hours      extra handling time, always real
+#   consumable straps, pads, skid board — small, always incurred
+#   rental     only when the crew has to hire gear they don't own. A partner
+#              who owns a piano board and stair-climber incurs none of this,
+#              so it is added only when we know they lack the equipment.
+# The old model charged $250 flat for "piano" whether or not any equipment was
+# hired, which inflated every heavy-item estimate.
 SPECIAL_ITEM_COST = {
-    "piano": (1.5, 250.0),
-    "safe": (1.5, 300.0),
-    "pool_table": (2.0, 275.0),
-    "heavy_equipment": (1.5, 200.0),
-    "oversized_furniture": (0.75, 75.0),
-    "large_appliance": (0.5, 60.0),
-    # Hazardous material can't go in a normal truck to a normal landfill.
-    "hazardous": (0.5, 180.0),
-    "not_sure": (0.5, 40.0),
+    "piano":              {"hours": 1.5, "consumable": 25.0, "rental": 120.0, "crew": 3},
+    "safe":               {"hours": 1.5, "consumable": 25.0, "rental": 140.0, "crew": 3},
+    "pool_table":         {"hours": 2.0, "consumable": 30.0, "rental": 80.0,  "crew": 3},
+    "heavy_equipment":    {"hours": 1.5, "consumable": 20.0, "rental": 150.0, "crew": 3},
+    "oversized_furniture":{"hours": 0.75,"consumable": 15.0, "rental": 0.0,   "crew": 3},
+    "large_appliance":    {"hours": 0.5, "consumable": 12.0, "rental": 0.0,   "crew": 2},
+    # Hazardous material can't ride in a normal truck to a normal landfill.
+    "hazardous":          {"hours": 0.5, "consumable": 0.0,  "rental": 0.0,   "crew": 2},
+    "not_sure":           {"hours": 0.5, "consumable": 10.0, "rental": 0.0,   "crew": 2},
 }
+
+# Heavy items whose handling genuinely depends on details we must ask for —
+# an upright and a grand piano are different jobs with different crews.
+NEEDS_DETAIL = {"piano", "safe", "pool_table", "heavy_equipment"}
 
 # Access problems cost time, so they are priced as time, not as a flat fee.
 ACCESS_HOURS = {
@@ -201,6 +212,83 @@ STOPS_PER_RUN = {
 # Jobs that involve a trip to a disposal facility.
 DISPOSING_SERVICES = {"junk_removal"}
 DISPOSING_JOB_TYPES = {"dump_run", "yard_construction_debris"}
+
+
+SERVICES_NEEDING_DESTINATION = {"local_move", "long_distance_move"}
+JOB_TYPES_NEEDING_DESTINATION = {"pickup_delivery", "material_transport",
+                                 "equipment_hauling", "furniture_appliance"}
+
+
+def missing_information(*, service_type, job_type, job_size, item_categories,
+                        special_item_types, special_items_note, access_issues,
+                        destination_access_issues, distance_basis,
+                        destination_known=True):
+    """What we would need before a number means anything.
+
+    Returns (blocking, advisory). A blocking gap stops the estimate outright:
+    a confident $939 on a piano job with no destination is worse than no
+    figure, because it looks like an answer. Advisory gaps only widen the band.
+    """
+    items = _listify(item_categories)
+    specials = [s for s in _listify(special_item_types) if s not in ("none", "not_sure")]
+    access = _listify(access_issues)
+    blocking, advisory = [], []
+
+    needs_destination = (service_type in SERVICES_NEEDING_DESTINATION
+                         or job_type in JOB_TYPES_NEEDING_DESTINATION)
+    if needs_destination and (not destination_known or distance_basis == "no_destination"):
+        blocking.append("Destination — the trip length drives most of the cost")
+
+    if not job_size or job_size == "not_sure":
+        if not items:
+            blocking.append("Job size or an item list — nothing to size the job from")
+        else:
+            advisory.append("Job size (estimated from the item list instead)")
+    if not items:
+        advisory.append("What is being moved or removed")
+
+    # An upright and a grand piano are different jobs with different crews, so
+    # "piano" on its own is not enough to size the work.
+    for item in specials:
+        if item in NEEDS_DETAIL and not (special_items_note or "").strip():
+            blocking.append(f"{item.replace('_', ' ').capitalize()} details — "
+                            f"type, approximate weight and how it gets out")
+
+    if not access or access == ["not_sure"]:
+        advisory.append("Access at the pickup")
+    if needs_destination and not _listify(destination_access_issues):
+        advisory.append("Access at the destination")
+    return blocking, advisory
+
+
+def recommend_crew(*, service_type, job_size, item_categories,
+                   special_item_types, access_issues, stairs_flights):
+    """How many people this job actually needs, and why.
+
+    Returned separately from the costing so the admin can see the reasoning
+    and override it — the number then flows through labour, time and margin.
+    """
+    fam = ("moving" if service_type in ("local_move", "long_distance_move")
+           else "junk_removal" if service_type == "junk_removal" else "hauling")
+    crew = CREW_SIZE.get(job_size, 2)
+    reasons = [f"{job_size.replace('_', ' ') or 'unknown size'} job → {crew}"]
+
+    specials = [s for s in _listify(special_item_types) if s not in ("none", "not_sure")]
+    for item in specials:
+        needed = SPECIAL_ITEM_COST.get(item, {}).get("crew", 2)
+        if needed > crew:
+            crew = needed
+            reasons.append(f"{item.replace('_', ' ')} needs {needed}")
+
+    access = _listify(access_issues)
+    if "stairs" in access and stairs_flights == "3_plus" and crew < 4:
+        crew += 1
+        reasons.append("three or more flights of stairs → +1")
+    elif "long_walk" in access and fam == "moving" and crew < 4:
+        crew += 1
+        reasons.append("long carry → +1")
+
+    return min(crew, 5), reasons
 
 
 def _setting(cfg, key):
@@ -260,8 +348,39 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
               destination_stairs_flights: str = "",
               property_type: str = "", urgency: str = "flexible",
               distance_miles: Optional[float] = None,
-              photo_count: int = 0) -> dict:
+              photo_count: int = 0, special_items_note: str = "",
+              distance_basis: str = "", destination_known: bool = True,
+              address_verified: bool = False, crew_override=None,
+              partner=None) -> dict:
     """Return the internal cost/price picture for one job. Admin use only."""
+    blocking, advisory = missing_information(
+        service_type=service_type, job_type=job_type, job_size=job_size,
+        item_categories=item_categories, special_item_types=special_item_types,
+        special_items_note=special_items_note, access_issues=access_issues,
+        destination_access_issues=destination_access_issues,
+        distance_basis=distance_basis, destination_known=destination_known)
+
+    recommended_crew, crew_reasons = recommend_crew(
+        service_type=service_type, job_size=job_size,
+        item_categories=item_categories, special_item_types=special_item_types,
+        access_issues=access_issues, stairs_flights=stairs_flights)
+
+    if blocking:
+        # No numbers at all. A precise figure built on a guessed destination
+        # reads as an answer, and the admin would price the lead against it.
+        return {
+            "status": "insufficient_information",
+            "currency": "USD",
+            "missing": blocking,
+            "advisory": advisory,
+            "recommended_crew": recommended_crew,
+            "crew_reasons": crew_reasons,
+            "confidence": "insufficient_information",
+            "internal_only": True,
+            "disclaimer": "Internal planning figure. Never shown or quoted to the "
+                          "customer — the partner sets the price.",
+        }
+
     items = _listify(item_categories)
     extras = _listify(extra_services)
     specials = [s for s in _listify(special_item_types) if s != "none"]
@@ -286,7 +405,9 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
     # ---- crew time -----------------------------------------------------
     fam = ("moving" if service_type in ("local_move", "long_distance_move")
            else "junk_removal" if service_type == "junk_removal" else "hauling")
-    crew = CREW_SIZE.get(job_size, 2)
+    # The admin may override the crew; everything downstream follows it.
+    crew = int(crew_override) if crew_override else recommended_crew
+    crew = max(1, min(crew, 6))
     table = BASE_HOURS[fam]
     hours = float(table.get(job_size, table["not_sure"]))
 
@@ -301,10 +422,19 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
 
     special_hours = 0.0
     special_equipment = 0.0
+    owned = set()
+    if partner is not None:
+        owned = {e.strip() for e in
+                 (getattr(partner, "equipment_owned", "") or "").split(",") if e.strip()}
+        if getattr(partner, "heavy_item_capable", False):
+            # A heavy-item-capable partner is assumed to carry the basic gear.
+            owned |= {"piano", "safe", "pool_table", "heavy_equipment"}
     for item in specials:
-        add_hours, add_cost = SPECIAL_ITEM_COST.get(item, (0.0, 0.0))
-        special_hours += add_hours
-        special_equipment += add_cost
+        spec = SPECIAL_ITEM_COST.get(item, {})
+        special_hours += spec.get("hours", 0.0)
+        special_equipment += spec.get("consumable", 0.0)
+        if item not in owned:
+            special_equipment += spec.get("rental", 0.0)
     hours += special_hours
 
     extra_hours = 0.0

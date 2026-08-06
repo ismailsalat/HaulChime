@@ -301,7 +301,8 @@ def test_cost_model_runs_but_never_reaches_the_customer():
     payload = new_form_payload()
     payload.update({"job_size": "full_truck",
                     "item_categories": "furniture,appliances,construction_debris",
-                    "special_item_types": "piano"})
+                    "special_item_types": "piano",
+                    "special_items_note": "Upright piano, about 500 lb"})
     response = client.post("/api/leads", data=payload)
     assert response.status_code == 201
 
@@ -320,7 +321,9 @@ def test_cost_model_runs_but_never_reaches_the_customer():
         assert economics["costs"]["fuel"] > 0
         assert economics["costs"]["labor"] > 0
         # A piano adds specialist equipment cost.
-        assert economics["costs"]["special_equipment"] >= 250
+        # Consumables plus a hire, because this partner isn't known to own
+        # piano gear — but nowhere near the old flat $250-per-piano charge.
+        assert 0 < economics["costs"]["special_equipment"] <= 200
         # The job has to be worth more than it costs to run.
         assert economics["estimated_job_value"] > economics["total_cost"]
         assert economics["estimated_range_low"] < economics["estimated_job_value"]
@@ -336,7 +339,8 @@ def test_cost_model_scales_with_the_size_of_the_job():
     big = job_costing.calculate(service_type="local_move", job_size="4br_plus",
                                 item_categories="furniture,boxes,appliances",
                                 access_issues="stairs", stairs_flights="3_plus",
-                                special_item_types="piano", distance_miles=22)
+                                special_item_types="piano",
+                                special_items_note="Upright, ~500 lb", distance_miles=22)
     assert big["estimated_job_value"] > small["estimated_job_value"] * 4
     assert big["crew_size"] > small["crew_size"]
     assert big["estimated_weight_lbs"] > small["estimated_weight_lbs"]
@@ -479,8 +483,9 @@ def test_estimate_breakdown_adds_up_exactly():
         dict(service_type="junk_removal", job_size="single_item",
              item_categories="mattresses", distance_miles=6),
         dict(service_type="local_move", job_size="3br", item_categories="boxes,furniture",
-             special_item_types="piano", extra_services="packing",
-             access_issues="stairs", stairs_flights="3_plus", distance_miles=18),
+             special_item_types="piano", special_items_note="Upright, ~500 lb, ground floor",
+             extra_services="packing", access_issues="stairs",
+             stairs_flights="3_plus", distance_miles=18),
         dict(service_type="long_distance_move", job_size="4br_plus",
              item_categories="boxes", distance_miles=412.7),
         dict(service_type="hauling", job_type="dump_run", job_size="large_load",
@@ -513,6 +518,11 @@ def test_estimate_has_no_impossible_values():
     ]
     for kwargs in hostile:
         r = job_costing.calculate(**kwargs)
+        if r.get("status") == "insufficient_information":
+            # Refusing to price is a valid — and preferable — outcome here.
+            assert r["missing"], kwargs
+            assert r["confidence"] == "insufficient_information"
+            continue
         numbers = list(r["costs"].values()) + [
             r["total_cost"], r["direct_cost"], r["estimated_job_value"],
             r["estimated_range_low"], r["estimated_range_high"]]
@@ -1348,3 +1358,83 @@ def test_admin_buttons_use_the_shared_styles():
         for match in re.finditer(r'<button(?![^>]*class=)[^>]*>', text):
             bad.append(f"{template.name}: {match.group(0)[:60]}")
     assert not bad, "unstyled buttons:\n" + "\n".join(bad)
+
+
+def test_estimate_refuses_to_price_a_piano_with_no_destination():
+    """The exact case from the admin screenshot: a heavy-item move with no
+    destination was showing a confident $939 built on an invented 12-mile
+    trip and a flat $250 equipment charge."""
+    import job_costing
+    result = job_costing.calculate(
+        service_type="local_move", job_type="single_heavy_item",
+        job_size="single_item", item_categories="heavy_specialty",
+        special_item_types="piano", special_items_note="",
+        access_issues="stairs", stairs_flights="2",
+        distance_basis="no_destination", destination_known=False)
+
+    assert result["status"] == "insufficient_information"
+    assert "estimated_job_value" not in result
+    assert "costs" not in result
+    assert result["confidence"] == "insufficient_information"
+    joined = " ".join(result["missing"]).lower()
+    assert "destination" in joined
+    assert "piano" in joined
+    # It still tells the admin what crew the job needs.
+    assert result["recommended_crew"] >= 3
+
+
+def test_estimate_returns_once_the_gaps_are_filled():
+    import job_costing
+    result = job_costing.calculate(
+        service_type="local_move", job_type="single_heavy_item",
+        job_size="single_item", item_categories="heavy_specialty",
+        special_item_types="piano",
+        special_items_note="Upright, roughly 500 lb, ground floor both ends",
+        access_issues="none", distance_miles=14, distance_basis="coordinates")
+    assert result["estimated_job_value"] > 0
+    assert result["crew_size"] >= 3
+
+
+def test_crew_recommendation_and_override_drive_the_cost():
+    import job_costing
+    base = dict(service_type="local_move", job_size="2br",
+                item_categories="boxes,furniture", distance_miles=12,
+                distance_basis="coordinates")
+    recommended = job_costing.calculate(**base)
+    bigger = job_costing.calculate(**base, crew_override=4)
+    smaller = job_costing.calculate(**base, crew_override=2)
+
+    assert bigger["crew_size"] == 4 and smaller["crew_size"] == 2
+    # Crew flows through paid hours, labour and therefore the price.
+    assert bigger["paid_crew_hours"] > recommended["paid_crew_hours"]
+    assert bigger["costs"]["labor"] > smaller["costs"]["labor"]
+    assert bigger["estimated_job_value"] > smaller["estimated_job_value"]
+
+    # A grand-scale job recommends more people, with the reasoning shown.
+    crew, reasons = job_costing.recommend_crew(
+        service_type="local_move", job_size="single_item",
+        item_categories="heavy_specialty", special_item_types="piano",
+        access_issues="stairs", stairs_flights="3_plus")
+    assert crew == 4
+    assert any("piano" in r for r in reasons)
+    assert any("stairs" in r for r in reasons)
+
+
+def test_partner_owning_the_gear_is_not_charged_to_hire_it():
+    """A flat per-piano equipment charge inflated every heavy-item estimate."""
+    import job_costing
+
+    class FakePartner:
+        heavy_item_capable = True
+        equipment_owned = "piano,safe"
+
+    common = dict(service_type="local_move", job_size="single_item",
+                  item_categories="heavy_specialty", special_item_types="piano",
+                  special_items_note="Upright, 500 lb", distance_miles=14,
+                  distance_basis="coordinates")
+    hired = job_costing.calculate(**common)
+    owned = job_costing.calculate(**common, partner=FakePartner())
+
+    assert owned["costs"]["special_equipment"] < hired["costs"]["special_equipment"]
+    assert owned["costs"]["special_equipment"] > 0        # consumables remain
+    assert hired["costs"]["special_equipment"] < 200      # not the old flat $250
