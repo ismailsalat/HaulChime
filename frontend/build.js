@@ -64,7 +64,18 @@ function footer() {
   </div><div class="shell footer-bottom"><span>© ${new Date().getFullYear()} HaulChime</span><span>HaulChime is a lead-generation and referral service, not a moving or hauling company.</span></div></footer>`;
 }
 
-function layout({title, description, body, pathName='/' , noindex=false}) {
+// Minimal brand bar for ad landing pages: the logo, and nothing to click away
+// with. No nav, no blog, no partner or admin links.
+function bareHeader() {
+  return `<header class="bare-header"><div class="shell"><a class="logo" href="/quote/" aria-label="HaulChime">HaulChime</a>
+  <span class="bare-trust">Free &middot; No payment required</span></div></header>`;
+}
+function bareFooter() {
+  return `<footer class="bare-footer"><div class="shell"><p>HaulChime connects you with independent local moving, hauling and junk-removal partners. We do not perform the work or set the price.</p>
+  <p><a href="/privacy/">Privacy</a> &middot; <a href="/terms/">Terms</a></p></div></footer>`;
+}
+
+function layout({title, description, body, pathName='/' , noindex=false, bare=false}) {
   const canonical = SITE.domain.replace(/\/$/,'') + pathName;
   return `<!doctype html><html lang="en"><head>
   <meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
@@ -74,7 +85,7 @@ function layout({title, description, body, pathName='/' , noindex=false}) {
   <link rel="stylesheet" href="/css/styles.css?v=${BUILD_ID}">
   <script>window.HAULCHIME_API=${JSON.stringify(SITE.apiUrl)};</script>
   <script src="/js/main.js?v=${BUILD_ID}" defer></script>
-  </head><body>${header()}<main>${body}</main>${footer()}</body></html>`;
+  </head><body>${bare ? bareHeader() : header()}<main>${body}</main>${bare ? bareFooter() : footer()}</body></html>`;
 }
 
 function serviceCard(icon, title, text, bullets, slug) {
@@ -123,7 +134,11 @@ function quoteBody(){
 return `<section class="quote-hero"><div class="shell quote-hero-grid"><div><span class="kicker">Free request · No obligation</span><h1>Tell us what needs to move.</h1><p>Answer a few simple questions and verify your phone. A service partner can then contact you directly to discuss the job and provide a quote.</p><div class="quote-points"><span>✓ Only key details required</span><span>✓ Photos are optional</span><span>✓ Usually 2–3 minutes</span></div></div><div class="quote-card" id="quote-app" data-quote-app><noscript>Please enable JavaScript to use the quote form.</noscript></div></div></section>`;
 }
 
-const quote = layout({title:'Request a Moving or Hauling Quote | HaulChime',description:'Submit a detailed moving, junk removal or hauling request with addresses, timing and photos.',pathName:'/quote/',body:quoteBody(),noindex:true});
+const quote = layout({title:'Get a Free Moving, Hauling or Junk Removal Quote | HaulChime',description:'Tell us about the job in about a minute. A local partner contacts you with a quote. Free to submit, no payment required.',pathName:'/quote/',noindex:true,bare:true,body:`<section class="quote-lite"><div class="shell narrow">
+  <h1>Get a free quote</h1>
+  <p class="quote-lite-sub">Tell us about the job in about a minute. A local partner will contact you to discuss it and give you a quote. Free to submit &mdash; no payment is required.</p>
+  <div class="quote-card" data-quote-app></div>
+</div></section>`});
 
 const how = layout({title:'How HaulChime Works',description:'Learn how HaulChime verifies and routes moving, junk-removal and hauling requests.',pathName:'/how-it-works/',body:`<section class="page-hero"><div class="shell narrow"><span class="kicker">How it works</span><h1>A simple request. A direct conversation.</h1><p>HaulChime gathers the important job details, verifies your phone number, and routes the request to a service partner that covers your area.</p></div></section><section class="section"><div class="shell steps-long"><article><span>01</span><div><h2>Choose the service</h2><p>Select moving, junk removal or hauling. The form only shows questions that fit your request.</p></div></article><article><span>02</span><div><h2>Add the important details</h2><p>Provide the pickup address, destination for a move, job size and a short item list. Dates, access notes and photos are optional.</p></div></article><article><span>03</span><div><h2>Verify your mobile number</h2><p>We text a one-time code before submission so partners receive a real, reachable contact.</p></div></article><article><span>04</span><div><h2>A partner contacts you</h2><p>A matched provider reviews the request and contacts you directly. You and the provider agree on pricing, scheduling and service terms together.</p></div></article></div></section><section class="cta-band"><div class="shell"><div><span>Start now</span><h2>Send your request in a few minutes.</h2></div><a class="button button-dark" href="/quote/">Request a quote</a></div></section>`});
 

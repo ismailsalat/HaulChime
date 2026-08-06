@@ -270,8 +270,14 @@
 
   function question(id, title, opts, body) {
     opts = opts || {};
-    var tag = opts.optional ? '<span class="tag tag-opt">Optional</span>'
-      : '<span class="tag tag-req">Required</span>';
+    // One required/optional badge per question, never two. When the body
+    // already labels its own field (a text input, an address block), the
+    // heading stays clean — otherwise "Drop-off address REQUIRED" sits right
+    // above "Street address REQUIRED", which says the same thing twice.
+    var bodyLabelsItself = /class="tag tag-(req|opt)"/.test(body || '');
+    var tag = (opts.tag === false || bodyLabelsItself) ? ''
+      : opts.optional ? '<span class="tag tag-opt">Optional</span>'
+        : '<span class="tag tag-req">Required</span>';
     return '<section class="q' + (opts.reveal ? ' q-reveal' : '') + '" id="q-' + id + '">' +
       '<div class="q-head"><h3 class="q-title">' + title + '</h3>' + tag +
       (opts.sub ? '<p class="q-sub">' + opts.sub + '</p>' : '') + '</div>' +
@@ -322,7 +328,8 @@
       esc(opts.placeholder || '') + '"' +
       (opts.inputmode ? ' inputmode="' + opts.inputmode + '"' : '') +
       (opts.autocomplete ? ' autocomplete="' + opts.autocomplete + '"' : '') +
-      (opts.maxlength ? ' maxlength="' + opts.maxlength + '"' : '') + '>' +
+      (opts.maxlength ? ' maxlength="' + opts.maxlength + '"' : '') +
+      (opts.optional ? '' : ' required aria-required="true"') + '>' +
       (opts.hint ? '<p class="hint">' + opts.hint + '</p>' : '') + '</div>';
   }
 
@@ -472,9 +479,16 @@
       config.maxPhotoMb + ' MB each.</p><div class="photo-buttons">' +
       '<button type="button" class="button button-outline" id="photo-take">📷 Take a photo</button>' +
       '<button type="button" class="button button-outline" id="photo-choose">🖼️ Choose photos</button>' +
-      '</div><input id="photo-input" type="file" multiple accept="image/jpeg,image/png,image/webp" hidden>' +
-      '<input id="photo-camera" type="file" accept="image/*" capture="environment" hidden>' +
-      photoPreview() + '</div>');
+      '</div>' +
+      // Two native inputs are needed (gallery vs camera), but the customer
+      // must never see either. `hidden` alone was not enough once a
+      // stylesheet set display on them, so this is belt and braces.
+      '<input id="photo-input" type="file" multiple ' +
+      'accept="image/jpeg,image/png,image/webp" hidden tabindex="-1" ' +
+      'aria-hidden="true" style="display:none!important">' +
+      '<input id="photo-camera" type="file" accept="image/*" capture="environment" ' +
+      'hidden tabindex="-1" aria-hidden="true" style="display:none!important">' +
+      photoSummary() + photoPreview() + '</div>');
 
     out += question('description', 'Anything else the partner should know?', { optional: true },
       '<div class="field"><label for="f-description"><span>Extra notes</span>' +
@@ -922,6 +936,15 @@
   }
 
   // ---------------------------------------------------------------- photos
+  function photoSummary() {
+    if (!state.photos.length) return '';
+    var count = state.photos.length;
+    return '<p class="photo-summary"><span>' + count + ' photo' +
+      (count === 1 ? '' : 's') + ' ready <span class="photo-count">(' +
+      (config.maxPhotos - count) + ' more allowed)</span></span>' +
+      '<button type="button" id="photo-clear">Remove all</button></p>';
+  }
+
   function photoPreview() {
     if (!state.photos.length) return '';
     return '<ul class="photo-preview">' + state.photos.map(function (file, i) {
@@ -935,17 +958,31 @@
   function addPhotos(files) {
     var limit = config.maxPhotoMb * 1024 * 1024;
     var rejected = 0;
+    var duplicates = 0;
+    function fingerprint(f) { return f.name + ':' + f.size + ':' + (f.lastModified || 0); }
+    var seen = state.photos.map(fingerprint);
     Array.prototype.slice.call(files).forEach(function (file) {
       if (state.photos.length >= config.maxPhotos) return;
       if (file.size > limit) { rejected += 1; return; }
+      // Picking the same image twice is easy to do and always a mistake.
+      if (seen.indexOf(fingerprint(file)) >= 0) { duplicates += 1; return; }
+      seen.push(fingerprint(file));
       state.photos.push(file);
     });
     if (rejected) {
       state.errors.photos = rejected + ' photo' + (rejected > 1 ? 's were' : ' was') +
         ' over ' + config.maxPhotoMb + ' MB and skipped.';
+    } else if (duplicates) {
+      state.errors.photos = duplicates + ' photo' + (duplicates > 1 ? 's were' : ' was') +
+        ' already added.';
     } else {
       delete state.errors.photos;
     }
+    // Reset the inputs so choosing the same file again still fires `change`.
+    ['#photo-input', '#photo-camera'].forEach(function (sel) {
+      var el = mount.querySelector(sel);
+      if (el) el.value = '';
+    });
     render();
   }
 
@@ -1160,6 +1197,12 @@
     if (take && camera) take.addEventListener('click', function () { camera.click(); });
     if (picker) picker.addEventListener('change', function () { addPhotos(picker.files); });
     if (camera) camera.addEventListener('change', function () { addPhotos(camera.files); });
+    var clearAll = mount.querySelector('#photo-clear');
+    if (clearAll) clearAll.addEventListener('click', function () {
+      state.photos = [];
+      delete state.errors.photos;
+      render();
+    });
     mount.querySelectorAll('[data-photo-remove]').forEach(function (element) {
       element.addEventListener('click', function () {
         state.photos.splice(Number(element.dataset.photoRemove), 1);

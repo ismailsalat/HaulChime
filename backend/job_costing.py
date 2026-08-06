@@ -40,7 +40,29 @@ Confidence is reported alongside the number. A request full of "Not sure"
 answers produces a wide, low-confidence range, and the admin should treat it
 as such rather than as a quote.
 """
+from decimal import Decimal, ROUND_HALF_UP
 from typing import Optional
+
+
+def _money(value) -> Decimal:
+    """Every dollar figure goes through here.
+
+    Binary floats cannot represent 0.10 exactly, so chaining rate multiplications
+    in float drifts and produces the odd cent that makes a breakdown fail to add
+    up. Money is computed as Decimal and quantised to cents at each boundary,
+    with ROUND_HALF_UP because that is what people expect when they check the
+    arithmetic by hand.
+    """
+    if isinstance(value, Decimal):
+        d = value
+    else:
+        try:
+            d = Decimal(str(value))
+        except Exception:
+            return Decimal("0.00")
+    if not d.is_finite():          # NaN or Infinity must never reach a page
+        return Decimal("0.00")
+    return d.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 # --------------------------------------------------------------- defaults
 # Every value here is read from Flask config at call time; these are only the
@@ -333,38 +355,53 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
             disposal_cost += 150.0    # special-handling gate rate
         disposal_cost = round(disposal_cost, 2)
 
-    # ---- roll up -------------------------------------------------------
-    labor_cost = round(paid_crew_hours * _setting(cfg, "LABOR_COST_PER_MOVER_HOUR"), 2)
-    direct_cost = round(labor_cost + fuel_cost + vehicle_cost + disposal_cost
-                        + special_equipment + materials, 2)
-    overhead = round(_setting(cfg, "OVERHEAD_PER_JOB")
-                     + direct_cost * _setting(cfg, "OVERHEAD_RATE"), 2)
-    total_cost = round(direct_cost + overhead, 2)
+    # ---- roll up (Decimal from here down) -------------------------------
+    labor_cost = _money(Decimal(str(paid_crew_hours))
+                        * Decimal(str(_setting(cfg, "LABOR_COST_PER_MOVER_HOUR"))))
+    fuel_cost = _money(fuel_cost)
+    vehicle_cost = _money(vehicle_cost)
+    disposal_cost = _money(disposal_cost)
+    special_equipment = _money(special_equipment)
+    materials = _money(materials)
 
-    margin = _setting(cfg, "TARGET_MARGIN")
+    direct_cost = _money(labor_cost + fuel_cost + vehicle_cost + disposal_cost
+                         + special_equipment + materials)
+    overhead = _money(Decimal(str(_setting(cfg, "OVERHEAD_PER_JOB")))
+                      + direct_cost * Decimal(str(_setting(cfg, "OVERHEAD_RATE"))))
+    total_cost = _money(direct_cost + overhead)
+
+    margin = Decimal(str(_setting(cfg, "TARGET_MARGIN")))
     if urgency == "today":
-        margin += 0.05          # same-day work commands a premium
+        margin += Decimal("0.05")       # same-day work commands a premium
     elif urgency == "48_hours":
-        margin += 0.02
-    margin = min(margin, 0.6)
+        margin += Decimal("0.02")
+    # Clamp: a margin at or above 1 would divide by zero or go negative.
+    margin = max(Decimal("0"), min(margin, Decimal("0.60")))
 
-    price_mid = round(total_cost / max(0.05, 1 - margin), 2)
-    spread = _setting(cfg, "PRICE_RANGE_SPREAD")
-    # A vague request gets a visibly wider band so nobody mistakes it for firm.
-    spread += 0.05 * unknowns
-    price_low = round(price_mid * (1 - spread), 2)
-    price_high = round(price_mid * (1 + spread), 2)
+    price_mid = _money(total_cost / (Decimal("1") - margin))
 
     # Moves are sold by the hour, so cross-check against the rate a mover
     # would actually quote and take whichever is higher. Junk and hauling are
     # sold by volume, so they get a floor price instead of an hourly floor.
     if fam == "moving":
-        hourly_floor = round(paid_crew_hours * _setting(cfg, "LABOR_BILLED_PER_MOVER_HOUR")
-                             + special_equipment + materials, 2)
+        hourly_floor = _money(Decimal(str(paid_crew_hours))
+                              * Decimal(str(_setting(cfg, "LABOR_BILLED_PER_MOVER_HOUR")))
+                              + special_equipment + materials)
         price_mid = max(price_mid, hourly_floor)
-    price_mid = max(price_mid, _setting(cfg, "MINIMUM_JOB_PRICE"))
-    price_low = round(price_mid * (1 - spread), 2)
-    price_high = round(price_mid * (1 + spread), 2)
+    price_mid = max(price_mid, _money(_setting(cfg, "MINIMUM_JOB_PRICE")))
+
+    spread = Decimal(str(_setting(cfg, "PRICE_RANGE_SPREAD")))
+    # A vague request gets a visibly wider band so nobody mistakes it for firm.
+    spread += Decimal("0.05") * unknowns
+    spread = max(Decimal("0"), min(spread, Decimal("0.60")))
+    price_low = _money(price_mid * (Decimal("1") - spread))
+    price_high = _money(price_mid * (Decimal("1") + spread))
+
+    # Invariants. These are cheap, and every one of them has been a real bug in
+    # some pricing system somewhere.
+    price_low = max(Decimal("0.00"), price_low)
+    price_mid = max(price_low, price_mid)
+    price_high = max(price_mid, price_high)
 
     confidence = "high" if unknowns == 0 else ("medium" if unknowns <= 2 else "low")
     if photo_count >= 3 and confidence == "medium":
@@ -381,21 +418,28 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
         "total_miles": round(miles, 1),
         "involves_disposal": disposing,
         "costs": {
-            "labor": labor_cost,
-            "fuel": fuel_cost,
-            "vehicle": vehicle_cost,
-            "disposal": disposal_cost,
-            "special_equipment": round(special_equipment, 2),
-            "materials": round(materials, 2),
-            "overhead": overhead,
+            "labor": float(labor_cost),
+            "fuel": float(fuel_cost),
+            "vehicle": float(vehicle_cost),
+            "disposal": float(disposal_cost),
+            "special_equipment": float(special_equipment),
+            "materials": float(materials),
+            "overhead": float(overhead),
         },
-        "direct_cost": direct_cost,
-        "total_cost": total_cost,
-        "target_margin_pct": round(margin * 100, 1),
-        "estimated_job_value": price_mid,
-        "estimated_range_low": price_low,
-        "estimated_range_high": price_high,
-        "estimated_profit": round(price_mid - total_cost, 2),
+        "direct_cost": float(direct_cost),
+        "total_cost": float(total_cost),
+        "target_margin_pct": float(_money(margin * 100)),
+        "estimated_job_value": float(price_mid),
+        "estimated_range_low": float(price_low),
+        "estimated_range_high": float(price_high),
+        "estimated_profit": float(_money(price_mid - total_cost)),
+        # Pre-formatted for templates, so no page can render $1234.5 or
+        # $1234.5000000001.
+        "display": {
+            "value": f"{price_mid:.2f}", "low": f"{price_low:.2f}",
+            "high": f"{price_high:.2f}", "cost": f"{total_cost:.2f}",
+            "profit": f"{_money(price_mid - total_cost):.2f}",
+        },
         "confidence": confidence,
         "unknown_answers": unknowns,
         # Repeated here so it travels with the number wherever it is rendered.

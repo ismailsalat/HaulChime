@@ -1,22 +1,17 @@
-Subject: New {tier} HaulChime lead — {reference}
+Subject: New {service_type} lead - {reference} ({zip_code})
 
-New lead: {reference}
-Service: {service_type}
-Job size: {job_size}
-Pickup ZIP: {zip_code}
-Destination ZIP: {destination_zip}
-Customer: {full_name}
-Phone: {phone}
-Email: {email}
-Urgency: {urgency}
-Photos: {photo_count}
-Tier: {tier}
-Lead price: ${lead_price}
-Score: {score}
-Matched partner: {contractor}
+A new lead came in.
 
-Inventory:
-{inventory}
+  Reference:   {reference}
+  Service:     {service_type}
+  Job size:    {job_size}
+  Area:        {zip_code}
+  Timing:      {urgency}
+  Quality:     {quality} (score {score})
+  Photos:      {photo_count}
 
-Description:
-{description}
+Open it in the admin dashboard:
+{site_url}/admin/leads/{lead_id}
+
+You will need to sign in. Customer contact details and the internal job
+estimate are behind that login on purpose - they are not repeated here.

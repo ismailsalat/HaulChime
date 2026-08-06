@@ -464,3 +464,87 @@ def test_send_requires_a_partner_and_a_channel():
                              data={"csrf_token": csrf, "email": "on"},
                              follow_redirects=True)
     assert "Assign a partner before sending" in unassigned.get_data(as_text=True)
+
+
+# --------------------------------------------------------------------------
+# Money must behave like money, not like binary floating point.
+# --------------------------------------------------------------------------
+
+def test_estimate_breakdown_adds_up_exactly():
+    """If the parts don't sum to the total, the admin can't trust any of it."""
+    import job_costing
+    from decimal import Decimal
+    cases = [
+        dict(service_type="junk_removal", job_size="single_item",
+             item_categories="mattresses", distance_miles=6),
+        dict(service_type="local_move", job_size="3br", item_categories="boxes,furniture",
+             special_item_types="piano", extra_services="packing",
+             access_issues="stairs", stairs_flights="3_plus", distance_miles=18),
+        dict(service_type="long_distance_move", job_size="4br_plus",
+             item_categories="boxes", distance_miles=412.7),
+        dict(service_type="hauling", job_type="dump_run", job_size="large_load",
+             item_categories="construction_debris", distance_miles=31.4),
+    ]
+    for kwargs in cases:
+        result = job_costing.calculate(**kwargs)
+        parts = sum(Decimal(str(v)) for v in result["costs"].values())
+        assert parts == Decimal(str(result["total_cost"])), kwargs
+        # Two decimal places, always.
+        for value in list(result["costs"].values()) + [result["estimated_job_value"]]:
+            assert Decimal(str(value)) == Decimal(str(value)).quantize(Decimal("0.01"))
+        assert result["display"]["value"].count(".") == 1
+        assert len(result["display"]["value"].split(".")[1]) == 2
+
+
+def test_estimate_has_no_impossible_values():
+    """Negative money, NaN, or a low above the high would each be a serious
+    bug in front of the person deciding what to charge."""
+    import job_costing
+    import math
+    # Deliberately hostile inputs: empty, unknown, zero distance, huge distance.
+    hostile = [
+        dict(service_type="hauling", job_size="", distance_miles=0),
+        dict(service_type="junk_removal", job_size="not_sure",
+             item_categories="not_sure", special_item_types="not_sure",
+             access_issues="not_sure", distance_miles=0),
+        dict(service_type="local_move", job_size="4br_plus", distance_miles=9999),
+        dict(service_type="junk_removal", job_size="single_item", distance_miles=-5),
+    ]
+    for kwargs in hostile:
+        r = job_costing.calculate(**kwargs)
+        numbers = list(r["costs"].values()) + [
+            r["total_cost"], r["direct_cost"], r["estimated_job_value"],
+            r["estimated_range_low"], r["estimated_range_high"]]
+        for value in numbers:
+            assert math.isfinite(value), (kwargs, value)
+            assert value >= 0, (kwargs, value)
+        assert r["estimated_range_low"] <= r["estimated_job_value"] <= r["estimated_range_high"]
+        assert 0 <= r["target_margin_pct"] <= 60
+
+
+def test_crew_size_and_mileage_are_each_applied_once():
+    """Doubling either one silently inflates every estimate."""
+    import job_costing
+    base = dict(service_type="local_move", job_size="2br",
+                item_categories="boxes,furniture", distance_miles=10)
+    result = job_costing.calculate(**base)
+    # paid_crew_hours = (handling + drive) x crew, counted a single time.
+    expected = round(
+        (result["handling_hours"] + result["drive_hours"]) * result["crew_size"], 2)
+    assert abs(result["paid_crew_hours"] - expected) < 0.02
+    # Doubling the distance must not more than double the mileage-driven costs.
+    farther = job_costing.calculate(**{**base, "distance_miles": 20})
+    assert farther["costs"]["fuel"] < result["costs"]["fuel"] * 2.5
+    assert farther["total_miles"] == result["total_miles"] + 10
+
+
+def test_estimate_is_not_exposed_to_the_public_api():
+    """Re-asserted here because it is the single most damaging thing that
+    could regress: HaulChime does not quote jobs."""
+    app = make_app(); client = app.test_client()
+    response = client.post("/api/leads", data=new_form_payload())
+    assert response.status_code == 201
+    body = response.get_data(as_text=True).lower()
+    for leaked in ("price", "cost", "estimate", "$", "margin", "profit"):
+        assert leaked not in body
+    assert set(response.get_json()) == {"ok", "reference"}

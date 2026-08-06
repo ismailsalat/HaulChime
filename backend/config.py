@@ -53,8 +53,8 @@ class Config:
     SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
     # Resend HTTP API (works where outbound SMTP ports are blocked, e.g. Railway).
     RESEND_API_KEY = os.getenv("RESEND_API_KEY", "")
-    MAIL_FROM = os.getenv("MAIL_FROM", "no-reply@example.com")
-    ADMIN_NOTIFY_EMAIL = os.getenv("ADMIN_NOTIFY_EMAIL", "owner@example.com")
+    MAIL_FROM = os.getenv("MAIL_FROM", "no-reply@haulchime.com")
+    ADMIN_NOTIFY_EMAIL = os.getenv("ADMIN_NOTIFY_EMAIL", "asalat@haulchime.com")
 
     # --- Admin auth ---
     ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")

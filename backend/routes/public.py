@@ -637,6 +637,7 @@ def create_lead():
         lead_price=result["price"], photo_count=len(photo_keys),
         source=lead.utm_source or "direct", campaign=lead.utm_campaign or "-",
         contact_method=labels.contact_label(lead.preferred_contact),
+        lead_id=lead.id,
         landing_page=lead.landing_page or "-",
         duplicate_status=f"Possible duplicate of {duplicate_ref}" if duplicate_ref else "No",
         contractor=partner.name if partner else "UNASSIGNED", site_url=cfg["SITE_URL"],
