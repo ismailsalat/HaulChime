@@ -726,3 +726,227 @@ def test_partners_sort_eligible_then_review_then_ineligible():
     assert [r["status"] for r in results] == ["eligible", "needs_review", "not_eligible"]
     assert results[1]["partner_name"] == "Blank Slate"
     assert results[-1]["partner_name"] == "Away Movers"
+
+
+# --------------------------------------------------------------------------
+# Partner portal
+# --------------------------------------------------------------------------
+
+def _approved_partner(app, name="Sound Hauling", phone="+12069440030"):
+    """An approved partner with a login account, ready to sign in."""
+    from models import Partner, PartnerAccount, PartnerApplication
+    with app.app_context():
+        partner = Partner(name=name, service_zips="98030", active=True,
+                          taking_leads=True, services_accepted="local_move",
+                          credit_balance=200, max_lead_price=100, daily_lead_limit=10)
+        db.session.add(partner); db.session.flush()
+        db.session.add(PartnerApplication(
+            business_name=name, phone=phone, phone_verified=True,
+            status="approved", partner_id=partner.id))
+        account = PartnerAccount(partner_id=partner.id, phone=phone,
+                                 phone_verified=True, active=True)
+        db.session.add(account); db.session.commit()
+        return partner.id, account.id
+
+
+def _sign_in(client, account_id):
+    """Put a partner session in place without going through SMS."""
+    with client.session_transaction() as sess:
+        sess["partner_account_id"] = account_id
+        sess["partner_csrf_token"] = "test-partner-csrf"
+    return "test-partner-csrf"
+
+
+def _assign(app, lead_id, partner_id, **kw):
+    from models import LeadAssignment
+    with app.app_context():
+        assignment = LeadAssignment(lead_id=lead_id, partner_id=partner_id,
+                                    lead_price=35, **kw)
+        db.session.add(assignment); db.session.commit()
+        return assignment.id
+
+
+def test_portal_requires_sign_in():
+    app = make_app(); client = app.test_client()
+    for path in ["/partner/", "/partner/leads", "/partner/availability",
+                 "/partner/profile"]:
+        response = client.get(path)
+        assert response.status_code == 302
+        assert "/partner/login" in response.headers["Location"]
+
+
+def test_partner_cannot_see_another_partners_lead():
+    """The whole security model in one test: guessing a reference must not
+    reach another partner's customer."""
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    mine_id, my_account = _approved_partner(app, "Mine", "+12069440030")
+    theirs_id, _ = _approved_partner(app, "Theirs", "+12069440031")
+    with app.app_context():
+        reference = Lead.query.first().reference
+        lead_id = Lead.query.first().id
+    _assign(app, lead_id, theirs_id)      # assigned to the OTHER partner
+
+    _sign_in(client, my_account)
+    assert client.get(f"/partner/leads/{reference}").status_code == 404
+    # And it must not appear in any listing.
+    assert reference not in client.get("/partner/leads").get_data(as_text=True)
+    for action in ("accept", "decline"):
+        response = client.post(f"/partner/leads/{reference}/{action}",
+                               data={"csrf_token": "test-partner-csrf",
+                                     "reason": "not_available"})
+        assert response.status_code == 404
+
+
+def test_customer_details_are_hidden_until_the_lead_is_accepted():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first()
+        reference, lead_id = lead.reference, lead.id
+    _assign(app, lead_id, partner_id)
+    csrf = _sign_in(client, account_id)
+
+    before = client.get(f"/partner/leads/{reference}").get_data(as_text=True)
+    for secret in ["Ismail", "2069440030", "123 Main St", "test@example.com"]:
+        assert secret not in before, secret
+    assert "unlock when you accept" in before
+    # The job itself is visible, so they can decide.
+    assert "98030" in before
+
+    client.post(f"/partner/leads/{reference}/accept", data={"csrf_token": csrf})
+    after = client.get(f"/partner/leads/{reference}").get_data(as_text=True)
+    assert "Ismail" in after
+    assert "123 Main St" in after
+    assert "tel:" in after and "sms:" in after
+    with app.app_context():
+        from models import LeadAssignment
+        a = LeadAssignment.query.first()
+        assert a.status == "accepted"
+        assert a.customer_details_revealed_at is not None
+
+
+def test_decline_requires_a_reason_and_records_it():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first(); reference, lead_id = lead.reference, lead.id
+    _assign(app, lead_id, partner_id)
+    csrf = _sign_in(client, account_id)
+
+    client.post(f"/partner/leads/{reference}/decline",
+                data={"csrf_token": csrf, "reason": "nonsense"})
+    with app.app_context():
+        from models import LeadAssignment
+        assert LeadAssignment.query.first().status != "declined"
+
+    client.post(f"/partner/leads/{reference}/decline",
+                data={"csrf_token": csrf, "reason": "outside_service_area",
+                      "note": "Too far north"})
+    with app.app_context():
+        from models import LeadAssignment, PartnerActivity
+        a = LeadAssignment.query.first()
+        assert a.status == "declined"
+        assert a.decline_reason == "outside_service_area"
+        assert PartnerActivity.query.filter_by(event_type="lead.declined").count() == 1
+
+
+def test_status_updates_need_acceptance_first():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first(); reference, lead_id = lead.reference, lead.id
+    _assign(app, lead_id, partner_id)
+    csrf = _sign_in(client, account_id)
+
+    client.post(f"/partner/leads/{reference}/status",
+                data={"csrf_token": csrf, "status": "job_booked"})
+    with app.app_context():
+        from models import LeadAssignment
+        assert LeadAssignment.query.first().status != "job_booked"
+
+    client.post(f"/partner/leads/{reference}/accept", data={"csrf_token": csrf})
+    client.post(f"/partner/leads/{reference}/status",
+                data={"csrf_token": csrf, "status": "job_booked"})
+    with app.app_context():
+        from models import LeadAssignment
+        assert LeadAssignment.query.first().status == "job_booked"
+    # "assigned" is not reachable backwards.
+    assert client.post(f"/partner/leads/{reference}/status",
+                       data={"csrf_token": csrf, "status": "assigned"}).status_code == 400
+
+
+def test_unapproved_and_suspended_partners_lose_access():
+    from models import PartnerApplication, PartnerAccount, Partner
+    app = make_app(); client = app.test_client()
+    partner_id, account_id = _approved_partner(app)
+    _sign_in(client, account_id)
+    assert client.get("/partner/").status_code == 200
+
+    with app.app_context():                       # application put back in review
+        PartnerApplication.query.filter_by(partner_id=partner_id).first().status = \
+            "pending_review"
+        db.session.commit()
+    assert client.get("/partner/").status_code == 302
+
+    _sign_in(client, account_id)
+    with app.app_context():                       # partner deactivated by admin
+        PartnerApplication.query.filter_by(partner_id=partner_id).first().status = "approved"
+        Partner.query.get(partner_id).active = False
+        db.session.commit()
+    response = client.get("/partner/", follow_redirects=True)
+    assert "currently inactive" in response.get_data(as_text=True)
+
+
+def test_partner_forms_require_csrf():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first(); reference, lead_id = lead.reference, lead.id
+    _assign(app, lead_id, partner_id)
+    _sign_in(client, account_id)
+    assert client.post(f"/partner/leads/{reference}/accept", data={}).status_code == 400
+    assert client.post("/partner/toggle-leads", data={}).status_code == 400
+
+
+def test_partner_cannot_edit_commercial_fields_via_profile():
+    """Credit, price caps and limits belong to the admin. Posting them must be
+    ignored, not merely hidden in the template."""
+    app = make_app(); client = app.test_client()
+    partner_id, account_id = _approved_partner(app)
+    csrf = _sign_in(client, account_id)
+    client.post("/partner/profile", data={
+        "csrf_token": csrf, "contact_person": "Sam",
+        "service_zips": "98030,98031", "service_local_move": "on",
+        "credit_balance": "999999", "max_lead_price": "1",
+        "daily_lead_limit": "999", "active": "on", "notes": "hacked",
+        "price_per_lead": "0",
+    })
+    with app.app_context():
+        from models import Partner
+        p = Partner.query.get(partner_id)
+        assert p.contact_person == "Sam"          # allowed field changed
+        assert float(p.credit_balance) == 200     # protected fields did not
+        assert float(p.max_lead_price) == 100
+        assert p.daily_lead_limit == 10
+        assert p.notes != "hacked"
+
+
+def test_application_cannot_be_submitted_without_a_verified_phone():
+    app = make_app(); client = app.test_client()
+    client.get("/partner/apply")
+    with client.session_transaction() as sess:
+        sess["partner_csrf_token"] = "apply-csrf"
+    response = client.post("/partner/apply", data={
+        "csrf_token": "apply-csrf", "business_name": "New Movers",
+        "phone": "2069440030", "zip_codes": "98030",
+        "service_local_move": "on",
+    }, follow_redirects=True)
+    assert "Verify your mobile number" in response.get_data(as_text=True)
+    with app.app_context():
+        from models import PartnerApplication
+        assert PartnerApplication.query.count() == 0

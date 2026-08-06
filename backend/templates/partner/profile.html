@@ -1,0 +1,50 @@
+{% extends "partner/base.html" %}{% set active='profile' %}
+{% block title %}Profile | HaulChime Partner{% endblock %}
+{% block body %}
+<h1>Profile</h1>
+<p class="muted small" style="margin-top:0">Keep this current — it decides which leads we can send you.</p>
+
+<form method="post" data-confirm="Save your profile? Your coverage and capabilities affect which leads reach you.">
+<input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+<div class="card">
+  <h2>Business</h2>
+  <div class="kv"><span>Partner name</span><strong>{{ partner.name }}</strong></div>
+  <div class="kv"><span>Mobile number</span><strong>{{ account.phone }} <span class="badge ok">Verified</span></strong></div>
+  <p class="muted small">To change your business name or phone number, contact HaulChime — a new number needs verifying again.</p>
+  <div class="field"><label for="contact_person">Contact person</label>
+    <input id="contact_person" name="contact_person" type="text" value="{{ partner.contact_person or '' }}"></div>
+  <div class="field"><label for="email">Email</label>
+    <input id="email" name="email" type="email" value="{{ partner.email or '' }}"></div>
+</div>
+
+<div class="card">
+  <h2>Coverage</h2>
+  <div class="field"><label for="service_zips">ZIP codes you serve</label>
+    <textarea id="service_zips" name="service_zips" placeholder="98030, 98031, 98032">{{ partner.service_zips or '' }}</textarea>
+    <p class="muted small">One per line or comma separated.</p></div>
+  <label>Services you accept</label>
+  {% for slug, name in SERVICE_CHOICES %}
+  <label class="check"><input type="checkbox" name="service_{{ slug }}" {{ 'checked' if slug in accepted }}><span>{{ name }}</span></label>
+  {% endfor %}
+</div>
+
+<div class="card">
+  <h2>Capabilities</h2>
+  <div class="field"><label for="crew_size">Usual crew size</label>
+    <input id="crew_size" name="crew_size" type="number" min="1" max="20" value="{{ partner.crew_size or '' }}"></div>
+  <div class="field"><label for="truck_capacity">Truck capacity</label>
+    <input id="truck_capacity" name="truck_capacity" type="text" value="{{ partner.truck_capacity or '' }}" placeholder="16-foot box truck"></div>
+  <label class="check"><input type="checkbox" name="heavy_item_capable" {{ 'checked' if partner.heavy_item_capable }}><span>Heavy-item capable (piano, safe, pool table)</span></label>
+  <label class="check"><input type="checkbox" name="commercial_capable" {{ 'checked' if partner.commercial_capable }}><span>Commercial and office jobs</span></label>
+  <div class="field"><label for="minimum_job">Minimum job requirements</label>
+    <textarea id="minimum_job" name="minimum_job" placeholder="No single-item jobs unless it's a piano, safe, appliance or oversized item.">{{ partner.minimum_job or '' }}</textarea></div>
+  <div class="field"><label for="jobs_not_accepted">Jobs you don't accept</label>
+    <textarea id="jobs_not_accepted" name="jobs_not_accepted" placeholder="No hazardous materials or concrete removal.">{{ partner.jobs_not_accepted or '' }}</textarea></div>
+</div>
+
+<button class="btn" type="submit">Save profile</button>
+</form>
+<p class="muted small" style="margin-top:20px;text-align:center">
+  Your availability lives on the <a href="{{ url_for('partner.availability') }}">Availability</a> tab.</p>
+{% endblock %}

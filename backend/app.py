@@ -111,10 +111,12 @@ def create_app(config_object=Config):
     from routes.admin import bp as admin_bp
     from routes.verification import bp as verification_bp
     from routes.address import bp as address_bp
+    from routes.partner import bp as partner_bp
     app.register_blueprint(public_bp)
     app.register_blueprint(admin_bp)
     app.register_blueprint(verification_bp)
     app.register_blueprint(address_bp)
+    app.register_blueprint(partner_bp)
 
     with app.app_context():
         try:

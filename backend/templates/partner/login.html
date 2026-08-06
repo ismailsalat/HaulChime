@@ -1,0 +1,40 @@
+{% extends "partner/base.html" %}{% block title %}Sign in | HaulChime Partner{% endblock %}
+{% block body %}
+<div class="card">
+  <h1>Partner sign in</h1>
+  {% if step == 'phone' %}
+    <p class="muted small">Enter the mobile number on your HaulChime partner account. We'll text you a six-digit code — there's no password to remember.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="phone">
+      <div class="field">
+        <label for="phone">Mobile number</label>
+        <input id="phone" name="phone" type="tel" inputmode="tel" autocomplete="tel"
+               value="{{ phone or '' }}" placeholder="(253) 555-0123" required>
+      </div>
+      <button class="btn" type="submit">Text me a code</button>
+    </form>
+  {% else %}
+    <p class="muted small">We sent a code to {{ masked or 'your phone' }}. It expires shortly.</p>
+    <form method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="code">
+      <input type="hidden" name="phone" value="{{ phone or '' }}">
+      <div class="field">
+        <label for="code">Six-digit code</label>
+        <input id="code" name="code" type="text" inputmode="numeric" maxlength="6"
+               autocomplete="one-time-code" pattern="[0-9]{6}" required
+               style="letter-spacing:.5em;font-size:1.4rem;text-align:center;font-weight:850">
+      </div>
+      <button class="btn" type="submit">Sign in</button>
+    </form>
+    <form method="post" style="margin-top:12px">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="step" value="phone">
+      <input type="hidden" name="phone" value="{{ phone or '' }}">
+      <button class="btn secondary" type="submit">Use a different number</button>
+    </form>
+  {% endif %}
+</div>
+<p class="muted small" style="text-align:center">Not a partner yet? <a href="{{ url_for('partner.apply') }}">Apply to join HaulChime</a>.</p>
+{% endblock %}

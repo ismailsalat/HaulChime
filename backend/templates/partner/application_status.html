@@ -1,0 +1,28 @@
+{% extends "partner/base.html" %}{% block title %}Application status | HaulChime Partner{% endblock %}
+{% block body %}
+<div class="card" style="text-align:center">
+  {% if not application %}
+    <h1>Application received</h1>
+    <p class="muted">Your application is being reviewed. We'll text you when a decision has been made.</p>
+  {% elif application.status == 'pending_review' %}
+    <div style="font-size:2.4rem">&#9203;</div>
+    <h1>Application received</h1>
+    <p class="muted">Thanks, {{ application.business_name }}. Your application is being reviewed — we'll text you as soon as there's a decision.</p>
+  {% elif application.status == 'approved' %}
+    <div style="font-size:2.4rem">&#10003;</div>
+    <h1>You're approved</h1>
+    <p class="muted">Welcome aboard. Sign in with your mobile number to see leads.</p>
+    <a class="btn" href="{{ url_for('partner.login') }}">Sign in</a>
+  {% elif application.status == 'changes_requested' %}
+    <h1>We need a few changes</h1>
+    <p class="muted">{{ application.admin_message or 'Please update your application and resubmit.' }}</p>
+    <a class="btn" href="{{ url_for('partner.apply') }}">Update my application</a>
+  {% elif application.status == 'rejected' %}
+    <h1>Application not approved</h1>
+    <p class="muted">{{ application.admin_message or "We're not able to add your company as a partner at this time. Thank you for your interest." }}</p>
+  {% else %}
+    <h1>Application status</h1>
+    <p class="muted">{{ message or 'Your application is in progress.' }}</p>
+  {% endif %}
+</div>
+{% endblock %}

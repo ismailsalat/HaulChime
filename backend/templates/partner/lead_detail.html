@@ -1,0 +1,113 @@
+{% extends "partner/base.html" %}{% set active='leads' %}
+{% block title %}{{ view.reference }} | HaulChime Partner{% endblock %}
+{% block body %}
+<p class="small"><a href="{{ url_for('partner.leads') }}">&larr; All leads</a></p>
+<h1>{{ view.service }}</h1>
+<p class="muted small" style="margin-top:0">
+  {{ view.reference }} &middot; <span class="badge {{ 'ok' if view.customer_visible else 'new' }}">
+  {{ view.status|replace('_',' ')|title }}</span></p>
+
+{% if not view.customer_visible %}
+<div class="card">
+  <h2>The job</h2>
+  <div class="kv"><span>Service</span><strong>{{ view.service }}{% if view.job_type %} &middot; {{ view.job_type }}{% endif %}</strong></div>
+  <div class="kv"><span>Area</span><strong>{{ view.city }}{% if view.city %}, {% endif %}{{ view.zip_code }}</strong></div>
+  <div class="kv"><span>Job size</span><strong>{{ view.job_size }}</strong></div>
+  <div class="kv"><span>Requested</span><strong>{{ view.service_date or view.timing }}{% if view.preferred_time %} &middot; {{ view.preferred_time }}{% endif %}</strong></div>
+  <div class="kv"><span>Property</span><strong>{{ view.property_type }}</strong></div>
+  {% if view.item_categories %}<div class="kv"><span>What's involved</span><strong>{{ view.item_categories }}</strong></div>{% endif %}
+  {% if view.special_items %}<div class="kv"><span>Heavy or special items</span><strong>{{ view.special_items }}</strong></div>{% endif %}
+  {% if view.extra_services %}<div class="kv"><span>Extra help wanted</span><strong>{{ view.extra_services }}</strong></div>{% endif %}
+  {% if view.access %}<div class="kv"><span>Access</span><strong>{{ view.access }}{% if view.stairs %} &middot; {{ view.stairs }}{% endif %}</strong></div>{% endif %}
+  {% if view.notes %}<div class="kv"><span>Customer notes</span><strong>{{ view.notes }}</strong></div>{% endif %}
+  <div class="kv"><span>Photos</span><strong>{{ view.photo_count }}</strong></div>
+  {% if view.lead_price != '0.00' %}<div class="kv"><span>Lead price</span><strong>${{ view.lead_price }}</strong></div>{% endif %}
+</div>
+
+<div class="locked">
+  <strong>Customer details unlock when you accept.</strong><br>
+  Name, phone, email and the exact address appear as soon as you take the job.
+</div>
+
+<div class="btn-row two">
+  <form method="post" action="{{ url_for('partner.accept_lead', reference=view.reference) }}"
+        data-confirm="Accept this lead? You'll get the customer's contact details and we'll expect you to reach out.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn" type="submit">Accept lead</button>
+  </form>
+  <button class="btn secondary" type="button"
+          onclick="document.getElementById('decline').hidden=false;this.hidden=true">Decline lead</button>
+</div>
+
+<div class="card" id="decline" hidden style="margin-top:16px">
+  <h2>Why are you declining?</h2>
+  <p class="muted small">One reason is enough — it lets us send this to someone else quickly.</p>
+  <form method="post" action="{{ url_for('partner.decline_lead', reference=view.reference) }}"
+        data-confirm="Decline this lead? It will be offered to another partner.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="reason">Reason</label>
+      <select id="reason" name="reason" required>
+        <option value="">Choose one…</option>
+        {% for r in decline_reasons %}<option value="{{ r }}">{{ r|replace('_',' ')|capitalize }}</option>{% endfor %}
+      </select>
+    </div>
+    <div class="field">
+      <label for="note">Anything else? (optional)</label>
+      <input id="note" name="note" type="text" maxlength="500">
+    </div>
+    <button class="btn danger" type="submit">Decline lead</button>
+  </form>
+</div>
+
+{% else %}
+<div class="card">
+  <h2>Contact the customer</h2>
+  <div class="kv"><span>Name</span><strong>{{ view.customer_name }}</strong></div>
+  <div class="kv"><span>Phone</span><strong>{{ view.customer_phone }}</strong></div>
+  {% if view.customer_email %}<div class="kv"><span>Email</span><strong>{{ view.customer_email }}</strong></div>{% endif %}
+  <div class="kv"><span>Prefers</span><strong>{{ view.contact_preference }}{% if view.contact_time %} &middot; {{ view.contact_time }}{% endif %}</strong></div>
+  <div class="btn-row two">
+    <a class="btn" href="tel:{{ view.customer_phone_link }}">Call customer</a>
+    <a class="btn secondary" href="sms:{{ view.customer_phone_link }}">Text customer</a>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Addresses</h2>
+  <div class="kv"><span>Pickup</span><strong>{{ view.pickup_address }}<br>{{ view.pickup_line2 }}</strong></div>
+  {% if view.destination_address or view.destination_line2 %}
+  <div class="kv"><span>Drop-off</span><strong>{{ view.destination_address or 'Not known yet' }}<br>{{ view.destination_line2 }}</strong></div>
+  {% endif %}
+</div>
+
+<div class="card">
+  <h2>The job</h2>
+  <div class="kv"><span>Job size</span><strong>{{ view.job_size }}</strong></div>
+  <div class="kv"><span>Requested</span><strong>{{ view.service_date or view.timing }}{% if view.preferred_time %} &middot; {{ view.preferred_time }}{% endif %}</strong></div>
+  {% if view.item_categories %}<div class="kv"><span>What's involved</span><strong>{{ view.item_categories }}</strong></div>{% endif %}
+  {% if view.special_items %}<div class="kv"><span>Heavy or special items</span><strong>{{ view.special_items }}</strong></div>{% endif %}
+  {% if view.access %}<div class="kv"><span>Access</span><strong>{{ view.access }}{% if view.stairs %} &middot; {{ view.stairs }}{% endif %}</strong></div>{% endif %}
+  {% if view.notes %}<div class="kv"><span>Customer notes</span><strong>{{ view.notes }}</strong></div>{% endif %}
+</div>
+
+<div class="card">
+  <h2>Update the outcome</h2>
+  <p class="muted small">Keeping this current helps us send you better-matched leads.</p>
+  <form method="post" action="{{ url_for('partner.update_status', reference=view.reference) }}"
+        data-confirm="Update this lead's outcome?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <div class="field">
+      <label for="status">Current status</label>
+      <select id="status" name="status" required>
+        {% for s in ['customer_contacted','estimate_scheduled','job_booked','job_completed',
+                     'customer_no_response','customer_chose_another_provider','not_a_good_fit','closed'] %}
+        <option value="{{ s }}" {{ 'selected' if s == view.status }}>{{ s|replace('_',' ')|capitalize }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <button class="btn" type="submit">Save update</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}
