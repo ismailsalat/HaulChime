@@ -548,3 +548,181 @@ def test_estimate_is_not_exposed_to_the_public_api():
     for leaked in ("price", "cost", "estimate", "$", "margin", "profit"):
         assert leaked not in body
     assert set(response.get_json()) == {"ok", "reference"}
+
+
+# --------------------------------------------------------------------------
+# Partner eligibility
+# --------------------------------------------------------------------------
+
+def _partner_with_schedule(app, **overrides):
+    """A fully eligible partner: covers the ZIP, does the service, works
+    Mon-Thu 10-18, has credit and headroom."""
+    from models import Partner, PartnerAvailability, PartnerApplication
+    from datetime import datetime, timezone
+    with app.app_context():
+        partner = Partner(
+            name="Sound Hauling", service_zips="98030,98031",
+            services_accepted="junk_removal,hauling,local_move", active=True,
+            taking_leads=True, credit_balance=140, max_lead_price=70,
+            daily_lead_limit=10, heavy_item_capable=True,
+            commercial_capable=False, minimum_notice_hours=24,
+            same_day_ok=False, billing_type="per_lead")
+        for key, value in overrides.items():
+            setattr(partner, key, value)
+        db.session.add(partner)
+        db.session.flush()
+        for day in range(7):
+            db.session.add(PartnerAvailability(
+                partner_id=partner.id, day_of_week=day,
+                available=day < 4, start_time="10:00", end_time="18:00"))
+        db.session.add(PartnerApplication(
+            business_name="Sound Hauling", phone="+12069440030",
+            phone_verified=True, status="approved", partner_id=partner.id,
+            approved_at=datetime.now(timezone.utc)))
+        db.session.commit()
+        return partner.id
+
+
+def _lead_on(app, weekday_offset, preferred_time="afternoon", **overrides):
+    """A lead whose service_date lands on a chosen weekday."""
+    from datetime import date, timedelta
+    with app.app_context():
+        lead = Lead.query.first()
+        target = date.today() + timedelta(days=3)
+        while target.weekday() != weekday_offset:
+            target += timedelta(days=1)
+        lead.service_date = target.isoformat()
+        lead.preferred_time = preferred_time
+        lead.urgency = "this_week"
+        for key, value in overrides.items():
+            setattr(lead, key, value)
+        db.session.commit()
+        return lead.id
+
+
+def test_partner_is_eligible_when_everything_matches():
+    import partner_eligibility
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)                     # a Wednesday, afternoon
+    with app.app_context():
+        from models import Partner
+        result = partner_eligibility.evaluate(
+            Partner.query.get(partner_id), Lead.query.first(), lead_price=35)
+    assert result["status"] == "eligible", result["failures"] + result["unknowns"]
+    assert result["failures"] == []
+
+
+def test_missing_time_is_needs_review_not_eligible():
+    """The whole point of the middle state: unknown is not the same as fine."""
+    import partner_eligibility
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    with app.app_context():
+        lead = Lead.query.first()
+        lead.service_date = None
+        lead.urgency = "flexible"
+        lead.preferred_time = ""
+        db.session.commit()
+        from models import Partner
+        result = partner_eligibility.evaluate(
+            Partner.query.get(partner_id), Lead.query.first(), lead_price=35)
+    assert result["status"] == "needs_review"
+    assert result["failures"] == []
+    assert any("day" in u.lower() or "date" in u.lower() for u in result["unknowns"])
+
+
+def test_each_failing_condition_is_reported_by_name():
+    import partner_eligibility
+    from models import Partner
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+
+    cases = {
+        "zip": ({"service_zips": "99999"}, {}, "ZIP coverage"),
+        "service": ({"services_accepted": "hauling"}, {}, "Service match"),
+        "credit": ({"credit_balance": 5}, {}, "Credit balance"),
+        "max_price": ({"max_lead_price": 10}, {}, "Maximum lead price"),
+        "paused": ({"taking_leads": False}, {}, "Taking leads"),
+        "inactive": ({"active": False}, {}, "Partner active"),
+        "commercial": ({"commercial_capable": False}, {"property_type": "commercial"},
+                       "Commercial capability"),
+    }
+    for name, (partner_kw, lead_kw, expected) in cases.items():
+        app = make_app(); client = app.test_client()
+        client.post("/api/leads", data=valid_payload())
+        partner_id = _partner_with_schedule(app, **partner_kw)
+        _lead_on(app, 2, **lead_kw)
+        with app.app_context():
+            result = partner_eligibility.evaluate(
+                Partner.query.get(partner_id), Lead.query.first(), lead_price=35)
+        assert result["status"] == "not_eligible", name
+        assert any(expected in f for f in result["failures"]), (name, result["failures"])
+
+
+def test_weekday_and_time_off_matching():
+    """Wednesday 3pm is fine for a Mon-Thu 10-6 partner; Saturday noon is not."""
+    import partner_eligibility
+    from models import Partner, PartnerTimeOff
+    from datetime import date, timedelta
+
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 5)                     # Saturday
+    with app.app_context():
+        result = partner_eligibility.evaluate(
+            Partner.query.get(partner_id), Lead.query.first(), lead_price=35)
+    assert result["status"] == "not_eligible"
+    assert any("Saturday" in f for f in result["failures"])
+
+    # Booked time off over the requested Wednesday.
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    lead_id = _lead_on(app, 2)
+    with app.app_context():
+        job_day = date.fromisoformat(Lead.query.get(lead_id).service_date)
+        db.session.add(PartnerTimeOff(partner_id=partner_id,
+                                      start_date=job_day - timedelta(days=1),
+                                      end_date=job_day + timedelta(days=2),
+                                      note="Vacation"))
+        db.session.commit()
+        result = partner_eligibility.evaluate(
+            Partner.query.get(partner_id), Lead.query.get(lead_id), lead_price=35)
+    assert result["status"] == "not_eligible"
+    assert any("time off" in f.lower() for f in result["failures"])
+
+
+def test_partners_sort_eligible_then_review_then_ineligible():
+    import partner_eligibility
+    from models import Partner, PartnerAvailability
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    good_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    with app.app_context():
+        bad = Partner(name="Away Movers", service_zips="99999",
+                      services_accepted="junk_removal", active=True,
+                      taking_leads=True, credit_balance=100, max_lead_price=70,
+                      daily_lead_limit=10)
+        unsure = Partner(name="Blank Slate", service_zips="98030",
+                         services_accepted="local_move", active=True,
+                         taking_leads=True, credit_balance=100,
+                         max_lead_price=70, daily_lead_limit=10,
+                         heavy_item_capable=True)
+        db.session.add_all([bad, unsure])
+        db.session.commit()
+        # Only the three built here — make_app() also seeds a demo partner.
+        subjects = Partner.query.filter(Partner.name.in_(
+            ["Sound Hauling", "Blank Slate", "Away Movers"])).all()
+        results = partner_eligibility.evaluate_all(
+            subjects, Lead.query.first(), lead_price=35)
+        order = [r["status"] for r in results]
+    assert order == sorted(order, key=lambda s: partner_eligibility.SORT_ORDER[s])
+    assert results[0]["partner_id"] == good_id
+    assert [r["status"] for r in results] == ["eligible", "needs_review", "not_eligible"]
+    assert results[1]["partner_name"] == "Blank Slate"
+    assert results[-1]["partner_name"] == "Away Movers"

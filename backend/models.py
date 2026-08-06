@@ -55,6 +55,13 @@ class Partner(db.Model):
     quota_period_start = db.Column(db.Date)         # first day of current cycle
     leads_this_period = db.Column(db.Integer, default=0)
     overage_price_per_lead = db.Column(db.Numeric(10, 2))
+    jobs_not_accepted = db.Column(db.Text)
+    # Partner-controlled switch, separate from `active` which only the admin
+    # sets. A partner pausing themselves must not look like a suspension.
+    taking_leads = db.Column(db.Boolean, default=True)
+    minimum_notice_hours = db.Column(db.Integer, default=24)
+    same_day_ok = db.Column(db.Boolean, default=False)
+    approved_at = db.Column(db.DateTime(timezone=True))
     notes = db.Column(db.Text)
     created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
 
@@ -327,3 +334,197 @@ class PhoneVerificationAttempt(db.Model):
         if not last:
             return 0
         return max(0, int(delay_seconds - (utcnow() - last).total_seconds()))
+
+
+# ===========================================================================
+# Partner portal
+#
+# These tables are additive. The existing `partners` table stays exactly as it
+# is and remains the record the admin edits and that leads are assigned to.
+# PartnerApplication is what a company fills in *before* it becomes a Partner;
+# PartnerAccount is the login attached to one. Keeping them separate means
+# every partner and lead you already have keeps working untouched, and an
+# application can be preserved for the record after approval.
+# ===========================================================================
+
+APPLICATION_STATUSES = (
+    "incomplete", "phone_verification_required", "pending_review",
+    "changes_requested", "approved", "rejected", "suspended",
+)
+
+ASSIGNMENT_STATUSES = (
+    "assigned", "viewed", "accepted", "declined", "customer_contacted",
+    "estimate_scheduled", "job_booked", "job_completed",
+    "customer_no_response", "customer_chose_another_provider",
+    "not_a_good_fit", "closed",
+)
+
+DECLINE_REASONS = (
+    "not_available", "schedule_conflict", "outside_service_area",
+    "job_too_large", "service_not_accepted", "lead_price_too_high",
+    "insufficient_capacity", "other",
+)
+
+# Statuses where the partner has committed to the job and may see the customer.
+ACCEPTED_STATUSES = frozenset(ASSIGNMENT_STATUSES) - {"assigned", "viewed", "declined"}
+
+
+class PartnerApplication(db.Model):
+    """A company asking to join. Survives approval as a historical record."""
+    __tablename__ = "partner_applications"
+    id = db.Column(db.Integer, primary_key=True)
+    business_name = db.Column(db.String(160), nullable=False)
+    contact_person = db.Column(db.String(120))
+    email = db.Column(db.String(255))
+    phone = db.Column(db.String(40), index=True)
+    phone_verified = db.Column(db.Boolean, default=False)
+    status = db.Column(db.String(30), default="phone_verification_required", index=True)
+
+    zip_codes = db.Column(db.Text, default="")           # comma-separated
+    services_accepted = db.Column(db.Text, default="")   # comma-separated slugs
+    crew_size = db.Column(db.Integer)
+    truck_capacity = db.Column(db.String(60))
+    heavy_item_capable = db.Column(db.Boolean, default=False)
+    commercial_capable = db.Column(db.Boolean, default=False)
+    minimum_job_requirements = db.Column(db.Text)
+    jobs_not_accepted = db.Column(db.Text)
+    minimum_notice_hours = db.Column(db.Integer, default=24)
+    availability_json = db.Column(db.Text)   # weekly grid captured at apply time
+
+    # Message shown to the applicant when changes are requested or rejected.
+    admin_message = db.Column(db.Text)
+    # Admin-only. Must never be rendered on a partner-facing page.
+    internal_notes = db.Column(db.Text)
+
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True)
+    partner = db.relationship("Partner", backref="applications")
+
+    submitted_at = db.Column(db.DateTime(timezone=True))
+    reviewed_at = db.Column(db.DateTime(timezone=True))
+    approved_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, index=True)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+    @property
+    def can_access_portal(self):
+        return self.status == "approved"
+
+
+class PartnerAccount(db.Model):
+    """A partner's passwordless login. One per partner, keyed on their phone."""
+    __tablename__ = "partner_accounts"
+    id = db.Column(db.Integer, primary_key=True)
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True, nullable=False)
+    partner = db.relationship("Partner", backref=db.backref("account", uselist=False))
+    application_id = db.Column(db.Integer, db.ForeignKey("partner_applications.id"))
+    # Stored E.164. Login is by SMS code only — there is no password to leak.
+    phone = db.Column(db.String(40), unique=True, index=True, nullable=False)
+    phone_verified = db.Column(db.Boolean, default=False)
+    active = db.Column(db.Boolean, default=True)
+    last_login_at = db.Column(db.DateTime(timezone=True))
+    last_activity_at = db.Column(db.DateTime(timezone=True))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+    updated_at = db.Column(db.DateTime(timezone=True), default=utcnow, onupdate=utcnow)
+
+
+class PartnerAvailability(db.Model):
+    """One row per weekday. Represents when the partner can *do the job*, not
+    when they can answer the phone."""
+    __tablename__ = "partner_availability"
+    __table_args__ = (db.UniqueConstraint("partner_id", "day_of_week",
+                                          name="uq_partner_day"),)
+    id = db.Column(db.Integer, primary_key=True)
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True, nullable=False)
+    partner = db.relationship("Partner", backref="availability")
+    day_of_week = db.Column(db.Integer, nullable=False)   # 0 = Monday .. 6 = Sunday
+    available = db.Column(db.Boolean, default=False)
+    start_time = db.Column(db.String(5), default="08:00")  # "HH:MM", 24-hour
+    end_time = db.Column(db.String(5), default="17:00")
+
+
+class PartnerTimeOff(db.Model):
+    """A date range the partner is unavailable, inclusive at both ends."""
+    __tablename__ = "partner_time_off"
+    id = db.Column(db.Integer, primary_key=True)
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True, nullable=False)
+    partner = db.relationship("Partner", backref="time_off")
+    start_date = db.Column(db.Date, nullable=False)
+    end_date = db.Column(db.Date, nullable=False)
+    note = db.Column(db.String(255))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow)
+
+    def covers(self, day):
+        return self.start_date <= day <= self.end_date
+
+
+class LeadAssignment(db.Model):
+    """One lead handed to one partner. This is the only thing that grants a
+    partner sight of a lead — every partner query joins through it."""
+    __tablename__ = "lead_assignments"
+    __table_args__ = (db.UniqueConstraint("lead_id", "partner_id",
+                                          name="uq_lead_partner"),)
+    id = db.Column(db.Integer, primary_key=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"), index=True, nullable=False)
+    lead = db.relationship("Lead", backref="assignments")
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True, nullable=False)
+    partner = db.relationship("Partner", backref="lead_assignments")
+
+    status = db.Column(db.String(40), default="assigned", index=True)
+    lead_price = db.Column(db.Numeric(10, 2))
+    decline_reason = db.Column(db.String(40))
+    decline_note = db.Column(db.String(500))
+
+    assigned_at = db.Column(db.DateTime(timezone=True), default=utcnow, index=True)
+    viewed_at = db.Column(db.DateTime(timezone=True))
+    accepted_at = db.Column(db.DateTime(timezone=True))
+    declined_at = db.Column(db.DateTime(timezone=True))
+    # The moment the partner earned the right to see contact details.
+    customer_details_revealed_at = db.Column(db.DateTime(timezone=True))
+    closed_at = db.Column(db.DateTime(timezone=True))
+    assigned_by_admin = db.Column(db.String(80))
+    # True when the admin assigned despite eligibility warnings.
+    assigned_with_override = db.Column(db.Boolean, default=False)
+    override_reasons = db.Column(db.Text)
+
+    @property
+    def customer_visible(self):
+        """The single source of truth for revealing customer contact details.
+        Templates and routes both ask this rather than testing statuses
+        themselves, so the rule can never drift between them."""
+        return self.status in ACCEPTED_STATUSES
+
+    @property
+    def is_open(self):
+        return self.status not in ("declined", "closed", "job_completed",
+                                   "customer_no_response",
+                                   "customer_chose_another_provider",
+                                   "not_a_good_fit")
+
+
+class PartnerActivity(db.Model):
+    """Audit trail for partner actions. Mirrors LeadActivity but scoped to a
+    partner, so the admin can see everything a partner did."""
+    __tablename__ = "partner_activity"
+    id = db.Column(db.Integer, primary_key=True)
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True)
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"), index=True)
+    assignment_id = db.Column(db.Integer, db.ForeignKey("lead_assignments.id"))
+    event_type = db.Column(db.String(60), index=True)
+    old_value = db.Column(db.String(255))
+    new_value = db.Column(db.String(255))
+    # Hashed, never raw: an IP is personal data and we only need to compare it.
+    ip_address_hash = db.Column(db.String(64))
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, index=True)
+
+
+class PartnerNotification(db.Model):
+    """In-portal notification. Deliberately carries no customer detail — the
+    partner signs in to see the lead."""
+    __tablename__ = "partner_notifications"
+    id = db.Column(db.Integer, primary_key=True)
+    partner_id = db.Column(db.Integer, db.ForeignKey("partners.id"), index=True, nullable=False)
+    lead_id = db.Column(db.Integer, db.ForeignKey("leads.id"))
+    title = db.Column(db.String(160))
+    message = db.Column(db.String(500))
+    read = db.Column(db.Boolean, default=False, index=True)
+    created_at = db.Column(db.DateTime(timezone=True), default=utcnow, index=True)
