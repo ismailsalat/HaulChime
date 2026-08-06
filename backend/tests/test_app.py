@@ -1354,7 +1354,7 @@ def test_admin_buttons_use_the_shared_styles():
     import pathlib
     bad = []
     for template in pathlib.Path("templates/admin").glob("*.html"):
-        text = template.read_text()
+        text = template.read_text(encoding="utf-8")
         for match in re.finditer(r'<button(?![^>]*class=)[^>]*>', text):
             bad.append(f"{template.name}: {match.group(0)[:60]}")
     assert not bad, "unstyled buttons:\n" + "\n".join(bad)
