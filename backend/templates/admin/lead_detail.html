@@ -91,6 +91,7 @@
 
     <p class="hint" style="margin-top:16px">
       Handling {{ c.get('handling_hours','—') }} h &middot; travel {{ c.get('drive_hours','—') }} h &middot;
+      priced against {% if c.get('priced_for_partner') %}<strong>{{ c.get('priced_for_partner') }}</strong>'s rate card{% else %}regional defaults (no partner assigned yet){% endif %} &middot;
       distance basis {{ (c.get('distance_basis','') or 'default')|replace('_',' ') }}
       ({{ c.get('distance_miles',0) }} mi loaded).
       {% if c.get('advisory') %}<br>Range widened &mdash; still missing: {{ c.get('advisory')|join('; ') }}.{% endif %}

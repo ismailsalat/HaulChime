@@ -577,7 +577,8 @@ def _partner_with_schedule(app, **overrides):
             taking_leads=True, credit_balance=140, max_lead_price=70,
             daily_lead_limit=10, heavy_item_capable=True,
             commercial_capable=False, minimum_notice_hours=24,
-            same_day_ok=False, billing_type="per_lead")
+            same_day_ok=False, billing_type="per_lead",
+            crew_size=4, available_crew_size=4)
         for key, value in overrides.items():
             setattr(partner, key, value)
         db.session.add(partner)
@@ -749,7 +750,8 @@ def _approved_partner(app, name="Sound Hauling", phone="+12069440030"):
     with app.app_context():
         partner = Partner(name=name, service_zips="98030", active=True,
                           taking_leads=True, services_accepted="local_move",
-                          credit_balance=200, max_lead_price=100, daily_lead_limit=10)
+                          credit_balance=200, max_lead_price=100,
+                          daily_lead_limit=10, crew_size=4, available_crew_size=4)
         db.session.add(partner); db.session.flush()
         db.session.add(PartnerApplication(
             business_name=name, phone=phone, phone_verified=True,
@@ -1480,3 +1482,140 @@ def test_admin_status_uses_text_not_only_colour():
     assert ("Nothing needs attention" in dashboard
             or "not assigned to a partner" in dashboard
             or "waiting for review" in dashboard)
+
+
+# --------------------------------------------------------------------------
+# Partner rate cards
+# --------------------------------------------------------------------------
+
+class RateCard:
+    """A partner with their own numbers, standing in for a DB row."""
+    name = "Sound Hauling"
+    heavy_item_capable = False
+    equipment_owned = ""
+    available_crew_size = 4
+    crew_size = 4
+    loaded_labor_cost_per_hour = 45      # they pay well
+    billed_rate_per_worker_hour = 95
+    crew_hourly_rate = None
+    minimum_billable_hours = 2
+    minimum_job_price = 250
+    truck_dispatch_cost = 40
+    dispatch_charge = 75
+    mileage_rate = 2.5
+    vehicle_cost_per_mile = 0.55
+    target_margin_pct = 45
+    heavy_item_surcharge = 200
+    stairs_surcharge_per_flight = 60
+    same_day_surcharge = 150
+
+
+def test_estimate_uses_the_assigned_partners_rate_card():
+    import job_costing
+    common = dict(service_type="local_move", job_size="2br",
+                  item_categories="boxes,furniture", distance_miles=15,
+                  distance_basis="coordinates")
+    regional = job_costing.calculate(**common)
+    theirs = job_costing.calculate(**common, partner=RateCard())
+
+    # Their labour costs more, so their cost to run is higher.
+    assert theirs["costs"]["labor"] > regional["costs"]["labor"]
+    # And they charge more, so the expected invoice is higher too.
+    assert theirs["estimated_job_value"] > regional["estimated_job_value"]
+    assert theirs["target_margin_pct"] == 45.0
+    # Truck dispatch cost lands in the vehicle line, not out of thin air.
+    assert theirs["costs"]["vehicle"] > regional["costs"]["vehicle"] + 39
+
+
+def test_a_crew_hourly_rate_is_not_multiplied_by_crew_size_again():
+    """The classic double-count: a crew rate already covers the whole crew."""
+    import job_costing
+
+    class CrewRate(RateCard):
+        crew_hourly_rate = 220
+        billed_rate_per_worker_hour = None
+        dispatch_charge = 0
+        mileage_rate = 0
+        minimum_job_price = 0
+        heavy_item_surcharge = 0
+        stairs_surcharge_per_flight = 0
+
+    result = job_costing.calculate(
+        service_type="local_move", job_size="2br", item_categories="boxes",
+        distance_miles=10, distance_basis="coordinates", partner=CrewRate(),
+        crew_override=3)
+    # Billed on clock hours x 220, not clock hours x 3 x 220.
+    ceiling = result["handling_hours"] * 220 * 1.6
+    assert result["estimated_job_value"] < ceiling, (
+        "crew hourly rate looks like it was multiplied by crew size")
+
+
+def test_partner_minimum_job_price_is_a_floor():
+    import job_costing
+
+    class Pricey(RateCard):
+        minimum_job_price = 600
+        crew_hourly_rate = None
+        billed_rate_per_worker_hour = 1
+
+    result = job_costing.calculate(
+        service_type="junk_removal", job_size="single_item",
+        item_categories="mattresses", distance_miles=5,
+        distance_basis="coordinates", partner=Pricey())
+    assert result["estimated_job_value"] >= 600
+
+
+def test_blank_rate_card_fields_fall_back_individually():
+    """A partner who filled in only their hourly rate still gets it used."""
+    import job_costing
+
+    class Partial:
+        name = "Half Filled"
+        heavy_item_capable = False
+        equipment_owned = ""
+        available_crew_size = 3
+        crew_size = 3
+        loaded_labor_cost_per_hour = 50
+        billed_rate_per_worker_hour = None
+        crew_hourly_rate = None
+        minimum_billable_hours = None
+        minimum_job_price = None
+        truck_dispatch_cost = None
+        dispatch_charge = None
+        mileage_rate = None
+        vehicle_cost_per_mile = None
+        target_margin_pct = None
+        heavy_item_surcharge = None
+        stairs_surcharge_per_flight = None
+        same_day_surcharge = None
+
+    common = dict(service_type="local_move", job_size="1br",
+                  item_categories="boxes", distance_miles=10,
+                  distance_basis="coordinates")
+    regional = job_costing.calculate(**common)
+    partial = job_costing.calculate(**common, partner=Partial())
+    assert partial["costs"]["labor"] > regional["costs"]["labor"]   # their rate
+    assert partial["target_margin_pct"] == regional["target_margin_pct"]  # default
+
+
+def test_a_partner_without_enough_crew_is_flagged():
+    """Silently dropping to a smaller crew is how someone ends up alone with a
+    piano at the top of a staircase."""
+    import partner_eligibility
+    from models import Partner
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app, crew_size=2, available_crew_size=2)
+    _lead_on(app, 2)
+    with app.app_context():
+        lead = Lead.query.first()
+        lead.job_size = "4br_plus"
+        lead.special_items = "piano"
+        db.session.commit()
+        result = partner_eligibility.evaluate(
+            Partner.query.get(partner_id), Lead.query.first(), lead_price=35)
+
+    assert result["status"] == "not_eligible"
+    crew_failure = [f for f in result["failures"] if "Crew" in f]
+    assert crew_failure, result["failures"]
+    assert "has 2" in crew_failure[0] and "needs" in crew_failure[0]

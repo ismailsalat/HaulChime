@@ -77,6 +77,12 @@ DEFAULTS = {
     "LABOR_BILLED_PER_MOVER_HOUR": 80.0,
     "MINIMUM_BILLABLE_HOURS": 2.0,      # movers only; junk is priced by volume
     "MINIMUM_JOB_PRICE": 95.0,          # the gate minimum on any truck roll
+    "TRUCK_DISPATCH_COST": 0.0,         # cost of rolling a truck at all
+    "DISPATCH_CHARGE": 0.0,             # what a partner bills for showing up
+    "MILEAGE_RATE": 0.0,                # charged per mile, on top of hours
+    "HEAVY_ITEM_SURCHARGE": 0.0,
+    "STAIRS_SURCHARGE_PER_FLIGHT": 0.0,
+    "SAME_DAY_SURCHARGE": 0.0,
     # Vehicle
     "FUEL_PRICE_PER_GALLON": 4.35,
     "TRUCK_MPG": 8.5,
@@ -291,6 +297,27 @@ def recommend_crew(*, service_type, job_size, item_categories,
     return min(crew, 5), reasons
 
 
+def _rate(partner, cfg, partner_field, config_key, scale=1.0):
+    """A rate-card value if the assigned partner set one, otherwise the
+    regional default.
+
+    Resolved per field rather than all-or-nothing, so a partner who has only
+    filled in their hourly rate still gets their hourly rate used while
+    everything else falls back. Blank and zero both mean "not set" — a partner
+    charging nothing per mile is not a case worth modelling.
+    """
+    if partner is not None:
+        raw = getattr(partner, partner_field, None)
+        if raw is not None:
+            try:
+                value = float(raw) * scale
+                if value > 0:
+                    return value
+            except (TypeError, ValueError):
+                pass
+    return _setting(cfg, config_key)
+
+
 def _setting(cfg, key):
     if cfg is None:
         return DEFAULTS[key]
@@ -465,7 +492,9 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
     miles = float(distance_miles) + overhead_miles / max(1.0, stops)
     mpg = max(1.0, _setting(cfg, "TRUCK_MPG"))
     fuel_cost = round(miles / mpg * _setting(cfg, "FUEL_PRICE_PER_GALLON"), 2)
-    vehicle_cost = round(miles * _setting(cfg, "VEHICLE_COST_PER_MILE"), 2)
+    vehicle_cost = round(
+        miles * _rate(partner, cfg, "vehicle_cost_per_mile", "VEHICLE_COST_PER_MILE")
+        + _rate(partner, cfg, "truck_dispatch_cost", "TRUCK_DISPATCH_COST"), 2)
     # Driving time is paid time. Assume an average 32 mph including loading
     # the truck at the yard and traffic.
     drive_hours = round(miles / 32.0, 2)
@@ -486,8 +515,9 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
         disposal_cost = round(disposal_cost, 2)
 
     # ---- roll up (Decimal from here down) -------------------------------
-    labor_cost = _money(Decimal(str(paid_crew_hours))
-                        * Decimal(str(_setting(cfg, "LABOR_COST_PER_MOVER_HOUR"))))
+    labor_rate = _rate(partner, cfg, "loaded_labor_cost_per_hour",
+                       "LABOR_COST_PER_MOVER_HOUR")
+    labor_cost = _money(Decimal(str(paid_crew_hours)) * Decimal(str(labor_rate)))
     fuel_cost = _money(fuel_cost)
     vehicle_cost = _money(vehicle_cost)
     disposal_cost = _money(disposal_cost)
@@ -500,7 +530,9 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
                       + direct_cost * Decimal(str(_setting(cfg, "OVERHEAD_RATE"))))
     total_cost = _money(direct_cost + overhead)
 
-    margin = Decimal(str(_setting(cfg, "TARGET_MARGIN")))
+    partner_margin = getattr(partner, "target_margin_pct", None) if partner else None
+    margin = (Decimal(str(partner_margin)) / Decimal("100")
+              if partner_margin else Decimal(str(_setting(cfg, "TARGET_MARGIN"))))
     if urgency == "today":
         margin += Decimal("0.05")       # same-day work commands a premium
     elif urgency == "48_hours":
@@ -513,12 +545,44 @@ def calculate(*, cfg=None, service_type: str, job_type: str = "",
     # Moves are sold by the hour, so cross-check against the rate a mover
     # would actually quote and take whichever is higher. Junk and hauling are
     # sold by volume, so they get a floor price instead of an hourly floor.
-    if fam == "moving":
-        hourly_floor = _money(Decimal(str(paid_crew_hours))
-                              * Decimal(str(_setting(cfg, "LABOR_BILLED_PER_MOVER_HOUR")))
-                              + special_equipment + materials)
-        price_mid = max(price_mid, hourly_floor)
-    price_mid = max(price_mid, _money(_setting(cfg, "MINIMUM_JOB_PRICE")))
+    # What this partner's own rate card would produce. Two shapes exist and
+    # mixing them is the classic double-count: a crew hourly rate already
+    # covers the whole crew, so it must NOT be multiplied by crew size again.
+    rate_card = None
+    if partner is not None and getattr(partner, "crew_hourly_rate", None):
+        billable_hours = max(float(hours),
+                             _rate(partner, cfg, "minimum_billable_hours",
+                                   "MINIMUM_BILLABLE_HOURS"))
+        rate_card = (Decimal(str(billable_hours))
+                     * Decimal(str(float(partner.crew_hourly_rate))))
+    elif partner is not None and getattr(partner, "billed_rate_per_worker_hour", None):
+        rate_card = (Decimal(str(paid_crew_hours))
+                     * Decimal(str(float(partner.billed_rate_per_worker_hour))))
+    elif fam == "moving":
+        rate_card = (Decimal(str(paid_crew_hours))
+                     * Decimal(str(_setting(cfg, "LABOR_BILLED_PER_MOVER_HOUR"))))
+
+    if rate_card is not None:
+        rate_card += Decimal(str(_rate(partner, cfg, "dispatch_charge",
+                                       "DISPATCH_CHARGE")))
+        rate_card += Decimal(str(miles)) * Decimal(str(
+            _rate(partner, cfg, "mileage_rate", "MILEAGE_RATE")))
+        if specials:
+            rate_card += Decimal(str(_rate(partner, cfg, "heavy_item_surcharge",
+                                           "HEAVY_ITEM_SURCHARGE")))
+        flights = {"1": 1, "2": 2, "3_plus": 3}.get(stairs_flights, 0)
+        if flights:
+            rate_card += Decimal(str(flights)) * Decimal(str(
+                _rate(partner, cfg, "stairs_surcharge_per_flight",
+                      "STAIRS_SURCHARGE_PER_FLIGHT")))
+        if urgency in ("today", "asap"):
+            rate_card += Decimal(str(_rate(partner, cfg, "same_day_surcharge",
+                                           "SAME_DAY_SURCHARGE")))
+        rate_card += disposal_cost + special_equipment + materials
+        price_mid = max(price_mid, _money(rate_card))
+
+    price_mid = max(price_mid, _money(_rate(partner, cfg, "minimum_job_price",
+                                            "MINIMUM_JOB_PRICE")))
 
     spread = Decimal(str(_setting(cfg, "PRICE_RANGE_SPREAD")))
     # A vague request gets a visibly wider band so nobody mistakes it for firm.

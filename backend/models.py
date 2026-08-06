@@ -56,6 +56,26 @@ class Partner(db.Model):
     leads_this_period = db.Column(db.Integer, default=0)
     overage_price_per_lead = db.Column(db.Numeric(10, 2))
     jobs_not_accepted = db.Column(db.Text)
+
+    # --- Rate card -------------------------------------------------------
+    # Every one of these is optional. When a partner leaves a field blank the
+    # estimate falls back to the regional default, so a partner added before
+    # this existed still works and nothing has to be backfilled.
+    available_crew_size = db.Column(db.Integer)          # people they can field
+    loaded_labor_cost_per_hour = db.Column(db.Numeric(10, 2))   # wage + burden
+    billed_rate_per_worker_hour = db.Column(db.Numeric(10, 2))  # what they charge
+    crew_hourly_rate = db.Column(db.Numeric(10, 2))      # alternative: whole crew
+    minimum_billable_hours = db.Column(db.Numeric(5, 2))
+    minimum_job_price = db.Column(db.Numeric(10, 2))
+    truck_dispatch_cost = db.Column(db.Numeric(10, 2))   # cost of rolling a truck
+    dispatch_charge = db.Column(db.Numeric(10, 2))       # what they bill for it
+    mileage_rate = db.Column(db.Numeric(10, 2))          # charged per mile
+    vehicle_cost_per_mile = db.Column(db.Numeric(10, 2))  # their real cost
+    target_margin_pct = db.Column(db.Numeric(5, 2))      # e.g. 30.0
+    heavy_item_surcharge = db.Column(db.Numeric(10, 2))
+    stairs_surcharge_per_flight = db.Column(db.Numeric(10, 2))
+    same_day_surcharge = db.Column(db.Numeric(10, 2))
+    equipment_owned = db.Column(db.Text)                 # comma-separated slugs
     # Partner-controlled switch, separate from `active` which only the admin
     # sets. A partner pausing themselves must not look like a suspension.
     taking_leads = db.Column(db.Boolean, default=True)
@@ -388,6 +408,26 @@ class PartnerApplication(db.Model):
     commercial_capable = db.Column(db.Boolean, default=False)
     minimum_job_requirements = db.Column(db.Text)
     jobs_not_accepted = db.Column(db.Text)
+
+    # --- Rate card -------------------------------------------------------
+    # Every one of these is optional. When a partner leaves a field blank the
+    # estimate falls back to the regional default, so a partner added before
+    # this existed still works and nothing has to be backfilled.
+    available_crew_size = db.Column(db.Integer)          # people they can field
+    loaded_labor_cost_per_hour = db.Column(db.Numeric(10, 2))   # wage + burden
+    billed_rate_per_worker_hour = db.Column(db.Numeric(10, 2))  # what they charge
+    crew_hourly_rate = db.Column(db.Numeric(10, 2))      # alternative: whole crew
+    minimum_billable_hours = db.Column(db.Numeric(5, 2))
+    minimum_job_price = db.Column(db.Numeric(10, 2))
+    truck_dispatch_cost = db.Column(db.Numeric(10, 2))   # cost of rolling a truck
+    dispatch_charge = db.Column(db.Numeric(10, 2))       # what they bill for it
+    mileage_rate = db.Column(db.Numeric(10, 2))          # charged per mile
+    vehicle_cost_per_mile = db.Column(db.Numeric(10, 2))  # their real cost
+    target_margin_pct = db.Column(db.Numeric(5, 2))      # e.g. 30.0
+    heavy_item_surcharge = db.Column(db.Numeric(10, 2))
+    stairs_surcharge_per_flight = db.Column(db.Numeric(10, 2))
+    same_day_surcharge = db.Column(db.Numeric(10, 2))
+    equipment_owned = db.Column(db.Text)                 # comma-separated slugs
     minimum_notice_hours = db.Column(db.Integer, default=24)
     availability_json = db.Column(db.Text)   # weekly grid captured at apply time
 

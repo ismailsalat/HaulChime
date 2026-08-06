@@ -248,6 +248,12 @@ def register(bp, login_required, check_csrf):
             partner_id=partner.id, lead_id=lead.id, event_type="lead.assigned",
             new_value=f"by {g.admin_user}"))
 
+        # Re-run the estimate against this partner's own rate card. Before
+        # assignment it used regional defaults, which is the right answer for
+        # "what is this lead worth" but the wrong one for "what will they
+        # charge and clear".
+        _recost_for_partner(lead, partner)
+
         audit("assignment.created", lead, actor_type="admin", actor_id=g.admin_user,
               contractor_id=partner.id, new_value=partner.name,
               lead_price=price, override=bool(warnings),
@@ -351,6 +357,39 @@ def register(bp, login_required, check_csrf):
             except Exception:
                 logger.warn("admin.applicant_sms_failed",
                             application_id=application.id)
+
+    def _recost_for_partner(lead, partner):
+        import json as _json
+        import job_costing
+        try:
+            previous = _json.loads(lead.cost_breakdown or "{}")
+        except ValueError:
+            previous = {}
+        if previous.get("status") == "insufficient_information":
+            return          # still missing facts; a partner does not supply them
+        try:
+            updated = job_costing.calculate(
+                cfg=current_app.config,
+                service_type=lead.service_type or lead.pest_type or "",
+                job_type=lead.job_type or "", job_size=lead.job_size or "",
+                item_categories=lead.item_categories or "",
+                extra_services=lead.extra_services or "",
+                special_item_types=lead.special_items or "",
+                special_items_note=lead.special_items_note or "x",
+                access_issues=lead.access_issues or "",
+                stairs_flights=lead.stairs_flights or "",
+                destination_access_issues=lead.destination_access_issues or "",
+                property_type=lead.property_type or "", urgency=lead.urgency or "flexible",
+                distance_miles=previous.get("distance_miles", 12),
+                distance_basis=previous.get("distance_basis", ""),
+                photo_count=previous.get("photo_count", 0),
+                partner=partner)
+            updated["priced_for_partner"] = partner.name
+            lead.cost_breakdown = _json.dumps(updated)
+            lead.estimated_job_value = updated.get("estimated_job_value")
+            lead.cost_confidence = updated.get("confidence")
+        except Exception:
+            logger.warn("admin.recost_failed", lead=lead.reference)
 
     def _notify_partner_by_sms(partner, lead):
         """Short, no customer detail, best effort. A failed text must not

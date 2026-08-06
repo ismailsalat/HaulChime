@@ -258,6 +258,28 @@ def evaluate(partner, lead, *, lead_price=None, leads_today=None, application=No
         checks.append(Check("commercial", "Commercial capability", "fail",
                             "Job is commercial"))
 
+    # --- crew capacity ----------------------------------------------------
+    # A three-person job silently reduced to a two-person crew is how someone
+    # ends up alone with a piano at the top of a staircase.
+    import job_costing
+    needed, reasons = job_costing.recommend_crew(
+        service_type=service, job_size=lead.job_size or "",
+        item_categories=lead.item_categories or "",
+        special_item_types=getattr(lead, "special_items", "") or "",
+        access_issues=lead.access_issues or "",
+        stairs_flights=lead.stairs_flights or "")
+    available = partner.available_crew_size or partner.crew_size
+    if not available:
+        checks.append(Check("crew", "Crew capacity", "unknown",
+                            f"Job needs {needed}; partner crew size not recorded"))
+    elif available >= needed:
+        checks.append(Check("crew", "Crew capacity", "ok",
+                            f"{available} available, job needs {needed}"))
+    else:
+        checks.append(Check("crew", "Crew capacity", "fail",
+                            f"Partner has {available} available, this job needs "
+                            f"{needed} ({'; '.join(reasons[1:]) or 'job size'})"))
+
     # --- schedule --------------------------------------------------------
     checks.extend(check_schedule(partner, lead))
 

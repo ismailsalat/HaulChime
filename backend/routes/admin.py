@@ -541,6 +541,25 @@ def partners(edit_id):
         raw_crew = (f.get("crew_size") or "").strip()
         p.crew_size = int(raw_crew) if raw_crew.isdigit() else None
         p.truck_capacity = f.get("truck_capacity", "").strip()
+
+        # Rate card. Every field is optional: blank clears it and the estimate
+        # falls back to the regional default for that one value only.
+        for field in ("loaded_labor_cost_per_hour", "billed_rate_per_worker_hour",
+                      "crew_hourly_rate", "minimum_billable_hours",
+                      "minimum_job_price", "truck_dispatch_cost", "dispatch_charge",
+                      "mileage_rate", "vehicle_cost_per_mile", "target_margin_pct",
+                      "heavy_item_surcharge", "stairs_surcharge_per_flight",
+                      "same_day_surcharge"):
+            raw_v = (f.get(field) or "").strip()
+            try:
+                setattr(p, field, float(raw_v) if raw_v else None)
+            except ValueError:
+                pass
+        raw_available = (f.get("available_crew_size") or "").strip()
+        p.available_crew_size = int(raw_available) if raw_available.isdigit() else None
+        p.equipment_owned = ",".join(
+            e.strip().lower().replace(" ", "_")
+            for e in (f.get("equipment_owned") or "").split(",") if e.strip()) or None
         p.heavy_item_capable = f.get("heavy_item_capable") == "on"
         p.commercial_capable = f.get("commercial_capable") == "on"
         p.billing_type = f.get("billing_type") if f.get("billing_type") in ("per_lead", "monthly") else "per_lead"
