@@ -316,6 +316,10 @@ class PhoneVerificationAttempt(db.Model):
     id = db.Column(db.Integer, primary_key=True)
     attempt_id = db.Column(db.String(50), unique=True, index=True)
     quote_draft_id = db.Column(db.String(60), index=True)
+    # What this verification authorises. A code proved for a customer quote
+    # must never grant partner-portal access: same number, different trust
+    # level. Reuse and completion both check this.
+    purpose = db.Column(db.String(30), default="quote", index=True)
     phone_e164 = db.Column(db.String(20))
     phone_hash = db.Column(db.String(64), index=True)
     session_hash = db.Column(db.String(64), index=True)

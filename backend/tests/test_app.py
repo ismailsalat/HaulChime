@@ -1964,3 +1964,122 @@ def test_a_gated_estimate_still_lets_the_customer_submit():
         assert lead.cost_confidence == "insufficient_information"
         assert lead.estimated_job_value is None      # no invented figure
         assert len(lead.cost_confidence) <= 40       # fits the column
+
+
+# --------------------------------------------------------------------------
+# A verification is scoped to what it was proved FOR.
+# --------------------------------------------------------------------------
+
+def test_a_quote_code_cannot_sign_you_in_to_the_partner_portal():
+    """The reported bug: verifying a phone on the quote form let the same
+    number sign in to the partner portal without any new code being sent.
+    Same number, very different trust level."""
+    from models import PhoneVerificationAttempt
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    app.config["PHONE_VERIFICATION_HMAC_SECRET"] = "test-hmac-secret"
+    app.config["PHONE_VERIFICATION_ENABLED"] = True
+    _approved_partner(app, "Testing Co", "+12065550144")
+    client = app.test_client()
+
+    # 1. Verify the number the ordinary customer way.
+    start = client.post("/api/quotes/phone-verification/start", json={
+        "phone": "2065550144", "quote_draft_id": "qd_customer",
+        "session_id": "sess_shared", "company_website": ""})
+    assert start.status_code == 200
+    quote_attempt = start.get_json()["verification_attempt_id"]
+    assert client.post("/api/quotes/phone-verification/complete", json={
+        "quote_draft_id": "qd_customer", "verification_attempt_id": quote_attempt,
+        "session_id": "sess_shared", "code": "123456"}).status_code == 200
+
+    with app.app_context():
+        assert PhoneVerificationAttempt.query.filter_by(
+            attempt_id=quote_attempt).one().purpose == "quote"
+
+    # 2. That attempt must not complete a partner sign-in.
+    portal = app.test_client()
+    portal.get("/partner/login")
+    with portal.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+        sess["partner_login_attempt"] = quote_attempt      # smuggle it in
+        sess["partner_login_phone"] = "+12065550144"
+    response = portal.post("/partner/login", data={
+        "csrf_token": csrf, "step": "code", "code": "123456"},
+        follow_redirects=True)
+    with portal.session_transaction() as sess:
+        assert "partner_account_id" not in sess, (
+            "a customer quote code signed someone in to the partner portal")
+    assert "valid here" in response.get_data(as_text=True)
+
+
+def test_signing_in_always_sends_a_fresh_code():
+    """Reuse is right for a quote — it saves the customer an SMS. It is wrong
+    for a login, where skipping the SMS is the entire attack."""
+    from models import PhoneVerificationAttempt
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    _approved_partner(app, "Testing Co", "+12065550144")
+    portal = app.test_client()
+    portal.get("/partner/login")
+    with portal.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+
+    def sign_in_request():
+        portal.post("/partner/login", data={
+            "csrf_token": csrf, "step": "phone", "phone": "2065550144"})
+        with portal.session_transaction() as sess:
+            return sess.get("partner_login_attempt")
+
+    first = sign_in_request()
+    assert first, "no code was sent"
+    with app.app_context():
+        attempt = PhoneVerificationAttempt.query.filter_by(attempt_id=first).one()
+        assert attempt.purpose == "partner_login"
+
+    # Complete it, then ask to sign in again: a NEW attempt must be started
+    # rather than the completed one being handed back.
+    portal.post("/partner/login", data={
+        "csrf_token": csrf, "step": "code", "code": "123456"})
+    portal.get("/partner/logout")
+    portal.get("/partner/login")
+    with portal.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+    # The resend cooldown is real and correct; step past it rather than
+    # asserting the code ignores it.
+    app.config["PHONE_VERIFICATION_RESEND_DELAY_SECONDS"] = 0
+    second = sign_in_request()
+    assert second, "no code was sent on the second sign-in"
+    with app.app_context():
+        reissued = PhoneVerificationAttempt.query.filter_by(attempt_id=second).one()
+        # Whether or not the row is reused, it must be back to unproven —
+        # otherwise completing it would succeed with any code at all.
+        assert reissued.status != "verified", (
+            "sign-in handed back an already-verified attempt; any code would pass")
+        assert reissued.verified_at is None
+
+
+def test_the_application_form_uses_its_own_purpose():
+    """An application verification is not a login, and vice versa."""
+    from models import PhoneVerificationAttempt
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    app.config["PHONE_VERIFICATION_HMAC_SECRET"] = "test-hmac-secret"
+    app.config["PHONE_VERIFICATION_ENABLED"] = True
+    client = app.test_client()
+    start = client.post("/api/quotes/phone-verification/start", json={
+        "phone": "2065550133", "quote_draft_id": "partner_apply",
+        "session_id": "partner_apply", "company_website": ""})
+    assert start.status_code == 200
+    with app.app_context():
+        attempt = PhoneVerificationAttempt.query.filter_by(
+            attempt_id=start.get_json()["verification_attempt_id"]).one()
+        assert attempt.purpose == "partner_apply"
+
+    # And a plain quote on the same number stays a quote.
+    other = client.post("/api/quotes/phone-verification/start", json={
+        "phone": "2065550122", "quote_draft_id": "qd_x",
+        "session_id": "s_x", "company_website": ""})
+    with app.app_context():
+        assert PhoneVerificationAttempt.query.filter_by(
+            attempt_id=other.get_json()["verification_attempt_id"]
+        ).one().purpose == "quote"

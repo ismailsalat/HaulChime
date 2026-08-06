@@ -100,6 +100,20 @@ close PowerShell, reopen it, and try again.
 
 ---
 
+## Files that belong to you, not to a zip
+
+These hold your own settings. If you ever copy files in from an archive,
+leave these alone or you will overwrite live configuration:
+
+| File | What it holds |
+|---|---|
+| `.firebaserc` | your Firebase project ID (`haulchime`) |
+| `backend/.env` | live Smarty, Bird and admin credentials |
+| `frontend/site.local.json` | your local dev URLs |
+| `.git/` | your commit history and remotes |
+
+---
+
 ## Step 5 — Log in and point the repo at your project
 
 ```powershell

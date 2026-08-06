@@ -262,7 +262,12 @@ def login_post():
         try:
             result = sms_verification.start_verification(
                 raw_phone=raw, quote_draft_id="partner_login",
-                ip=ip, session_id=session.get(CSRF_KEY, ""))
+                ip=ip, session_id=session.get(CSRF_KEY, ""),
+                purpose="partner_login",
+                # Signing in always costs a fresh code. Reusing an earlier
+                # verification would let anyone holding the session in without
+                # ever receiving an SMS.
+                allow_reuse=False)
         except sms_verification.VerificationError as exc:
             flash(exc.message if hasattr(exc, "message") else str(exc), "error")
             return render_template("partner/login.html", step="phone", phone=raw)
@@ -284,7 +289,8 @@ def login_post():
     try:
         sms_verification.complete_verification(
             quote_draft_id="partner_login", attempt_id=attempt_id,
-            code=code, session_id=session.get(CSRF_KEY, ""))
+            code=code, session_id=session.get(CSRF_KEY, ""),
+            purpose="partner_login")
     except sms_verification.VerificationError as exc:
         flash(getattr(exc, "message", str(exc)), "error")
         return render_template("partner/login.html", step="code",
@@ -661,7 +667,8 @@ def apply_post():
             # Third argument is the phone in E.164 — the digest is compared
             # against it, so the verified attempt has to belong to THIS number.
             attempt = sms_verification.attempt_for_quote(
-                "partner_apply", attempt_id, checked.e164)
+                "partner_apply", attempt_id, checked.e164,
+                purpose="partner_apply")
             verified = bool(attempt and attempt.status == "verified")
         except Exception:
             verified = False

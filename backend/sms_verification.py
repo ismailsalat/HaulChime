@@ -132,9 +132,15 @@ def check_rate_limits(cfg, ph: str, ip_h: str, sess_h: str) -> None:
             break
 
 
-def find_reusable(cfg, ph: str, sess_h: str) -> Optional[PhoneVerificationAttempt]:
-    """Reuse only within the SAME browser session — never trust a phone number
-    globally because a different visitor once verified it."""
+def find_reusable(cfg, ph: str, sess_h: str,
+                  purpose: str = "quote") -> Optional[PhoneVerificationAttempt]:
+    """Reuse only within the SAME browser session AND the same purpose.
+
+    Session scoping stops us trusting a number because some other visitor once
+    verified it. Purpose scoping stops a customer quote verification being
+    reused to sign in to the partner portal — the number is the same but the
+    thing it unlocks is not.
+    """
     if not sess_h:
         return None
     cutoff = utcnow() - timedelta(days=cfg["PHONE_VERIFICATION_REUSE_DAYS"])
@@ -142,6 +148,7 @@ def find_reusable(cfg, ph: str, sess_h: str) -> Optional[PhoneVerificationAttemp
             .filter(PhoneVerificationAttempt.phone_hash == ph,
                     PhoneVerificationAttempt.session_hash == sess_h,
                     PhoneVerificationAttempt.status == "verified",
+                    PhoneVerificationAttempt.purpose == purpose,
                     PhoneVerificationAttempt.verified_at >= cutoff)
             .order_by(PhoneVerificationAttempt.verified_at.desc())
             .first())
@@ -158,7 +165,8 @@ def is_fictional(e164: str) -> bool:
 
 
 def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
-                       session_id: str) -> dict:
+                       session_id: str, purpose: str = "quote",
+                       allow_reuse: bool = True) -> dict:
     """Run every free check, then send at most ONE Bird SMS."""
     cfg = current_app.config
 
@@ -181,7 +189,9 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
 
     # Reuse a verification from this same session — no SMS needed.
     logger.debug("verify.checking_reuse", reuse_days=cfg["PHONE_VERIFICATION_REUSE_DAYS"])
-    reusable = find_reusable(cfg, ph, sess_h)
+    # Signing in must always cost a fresh code — reusing an earlier
+    # verification would let anyone holding the session skip the SMS entirely.
+    reusable = find_reusable(cfg, ph, sess_h, purpose) if allow_reuse else None
     logger.debug("verify.reuse_result", found=bool(reusable))
     if reusable:
         logger.info("verify.reused", attempt_id=reusable.attempt_id,
@@ -195,7 +205,8 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
 
     # Existing attempt for this quote+phone: enforce cooldown and the 2-send cap.
     attempt = (PhoneVerificationAttempt.query
-               .filter_by(quote_draft_id=quote_draft_id, phone_hash=ph)
+               .filter_by(quote_draft_id=quote_draft_id, phone_hash=ph,
+                          purpose=purpose)
                .order_by(PhoneVerificationAttempt.created_at.desc())
                .first())
     logger.debug("verify.existing_attempt",
@@ -203,7 +214,7 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
                  status=attempt.status if attempt else None,
                  sends=(attempt.send_request_count if attempt else 0),
                  expired=(attempt.is_expired if attempt else None))
-    if attempt and attempt.status == "verified":
+    if attempt and attempt.status == "verified" and allow_reuse:
         return {"success": True, "already_verified": True,
                 "verification_attempt_id": attempt.attempt_id,
                 "phone_e164": e164, "masked_phone": result.masked,
@@ -221,7 +232,8 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
     else:
         attempt = PhoneVerificationAttempt(
             attempt_id="pva_" + secrets.token_urlsafe(24),
-            quote_draft_id=quote_draft_id, phone_e164=e164, phone_hash=ph,
+            quote_draft_id=quote_draft_id, purpose=purpose,
+            phone_e164=e164, phone_hash=ph,
             session_hash=sess_h, ip_hash=ip_h,
             risk_flags=result.risk_flag or None,
         )
@@ -242,6 +254,12 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
     code = _generate_code() if not dev_test else (cfg.get("DEV_OTP_CODE") or "123456")
     attempt.otp_digest = _code_digest(code, attempt.attempt_id, e164)
     attempt.attempt_count = 0
+    # Issuing a new code means this attempt is no longer proven. Leaving a
+    # reused row marked "verified" would let complete_verification short-
+    # circuit and accept ANY code — the login flow reuses the row by design,
+    # so this reset is what keeps that safe.
+    attempt.status = "pending"
+    attempt.verified_at = None
 
     # Count the send BEFORE the paid call — conservative by design, so a
     # double-click or a browser failure can't buy a free extra message.
@@ -309,7 +327,8 @@ def start_verification(*, raw_phone: str, quote_draft_id: str, ip: str,
 
 # ---------------------------------------------------------------- complete
 def complete_verification(*, quote_draft_id: str, attempt_id: str,
-                          code: str, session_id: str) -> dict:
+                          code: str, session_id: str,
+                          purpose: str = "quote") -> dict:
     """Validate the 6-digit code the customer typed and bind it to this
     quote + session. Success consumes the attempt so it can't be replayed."""
     cfg = current_app.config
@@ -322,6 +341,14 @@ def complete_verification(*, quote_draft_id: str, attempt_id: str,
                  status=attempt.status if attempt else None,
                  consumed=(attempt.is_consumed if attempt else None),
                  expired=(attempt.is_expired if attempt else None))
+    # A code proved for one purpose must not complete another. Without this a
+    # quote verification would sign someone in to the partner portal.
+    if attempt and (attempt.purpose or "quote") != purpose:
+        logger.warn("verify.purpose_mismatch", attempt_id=attempt_id,
+                    expected=purpose, actual=attempt.purpose)
+        raise VerificationError(
+            "attempt_not_found",
+            "That code isn't valid here. Request a new one.")
     if not attempt:
         raise VerificationError("attempt_not_found",
                                 "That verification session is no longer valid. "
@@ -396,7 +423,8 @@ def complete_verification(*, quote_draft_id: str, attempt_id: str,
 
 
 def attempt_for_quote(quote_draft_id: str, attempt_id: str,
-                      phone_e164: str) -> Optional[PhoneVerificationAttempt]:
+                      phone_e164: str,
+                      purpose: str = "quote") -> Optional[PhoneVerificationAttempt]:
     """Used at lead submission: confirm this quote really was verified."""
     if not attempt_id:
         return None
@@ -405,6 +433,8 @@ def attempt_for_quote(quote_draft_id: str, attempt_id: str,
     if not attempt:
         return None
     if attempt.quote_draft_id != quote_draft_id:
+        return None
+    if (attempt.purpose or "quote") != purpose:
         return None
     try:
         if not hmac.compare_digest(phone_hash(phone_e164), attempt.phone_hash):

@@ -18,6 +18,18 @@ from security import rate_limited
 bp = Blueprint("verification", __name__, url_prefix="/api/quotes/phone-verification")
 
 
+
+# The public endpoint serves both the customer quote form and the partner
+# application form. The purpose is derived from the draft id server-side
+# rather than taken from the request body, so a caller cannot name its own
+# trust level. Anything unrecognised is treated as an ordinary quote.
+PURPOSE_BY_DRAFT = {"partner_apply": "partner_apply"}
+
+
+def _purpose_for(quote_draft_id: str) -> str:
+    return PURPOSE_BY_DRAFT.get((quote_draft_id or "").strip(), "quote")
+
+
 @bp.after_request
 def add_cors(resp):
     origin = request.headers.get("Origin", "")
@@ -89,6 +101,7 @@ def start():
             raw_phone=data.get("phone", ""),
             quote_draft_id=(data.get("quote_draft_id") or "")[:60],
             ip=ip,
+            purpose=_purpose_for(data.get("quote_draft_id")),
             session_id=data.get("session_id", ""))
     except fv.VerificationError as e:
         logger.info("verify.start_rejected", reason=e.code,
@@ -113,6 +126,7 @@ def complete():
             quote_draft_id=(data.get("quote_draft_id") or "")[:60],
             attempt_id=(data.get("verification_attempt_id") or "")[:50],
             code=(data.get("code") or ""),
+            purpose=_purpose_for(data.get("quote_draft_id")),
             session_id=data.get("session_id", ""))
     except fv.VerificationError as e:
         logger.info("verify.complete_rejected", reason=e.code)
