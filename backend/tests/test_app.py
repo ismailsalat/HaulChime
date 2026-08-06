@@ -950,3 +950,168 @@ def test_application_cannot_be_submitted_without_a_verified_phone():
     with app.app_context():
         from models import PartnerApplication
         assert PartnerApplication.query.count() == 0
+
+
+# --------------------------------------------------------------------------
+# Admin: applications, assignment, overrides, deletion
+# --------------------------------------------------------------------------
+
+def test_approving_an_application_creates_a_working_partner():
+    from models import Partner, PartnerAccount, PartnerApplication, PartnerAvailability
+    import json as _json
+    app = make_app(); client = app.test_client()
+    with app.app_context():
+        db.session.add(PartnerApplication(
+            business_name="Cascade Movers", contact_person="Dana",
+            email="dana@example.com", phone="+12069440031", phone_verified=True,
+            status="pending_review", zip_codes="98030,98031",
+            services_accepted="local_move,junk_removal", crew_size=3,
+            truck_capacity="16-foot box truck", heavy_item_capable=True,
+            minimum_notice_hours=24,
+            availability_json=_json.dumps([
+                {"day": d, "available": d < 4, "start": "10:00", "end": "18:00"}
+                for d in range(7)])))
+        db.session.commit()
+    csrf = _login(client)
+    response = client.post("/admin/partner-applications/1", data={
+        "csrf_token": csrf, "action": "approve", "credit_balance": "140",
+        "max_lead_price": "70", "price_per_lead": "40", "daily_lead_limit": "10",
+        "active": "on", "internal_notes": "Met at the Kent expo",
+    })
+    assert response.status_code == 302
+
+    with app.app_context():
+        partner = Partner.query.filter_by(name="Cascade Movers").one()
+        assert partner.service_zips == "98030,98031"
+        assert partner.heavy_item_capable is True
+        assert float(partner.credit_balance) == 140      # admin-set terms stick
+        assert partner.notes == "Met at the Kent expo"
+        # The weekly grid carried across into real rows.
+        days = {r.day_of_week: r.available for r in partner.availability}
+        assert days[2] is True and days[5] is False
+        # A login account now exists and is active.
+        account = PartnerAccount.query.filter_by(phone="+12069440031").one()
+        assert account.active and account.partner_id == partner.id
+        # The application survives as the historical record.
+        application = PartnerApplication.query.get(1)
+        assert application.status == "approved"
+        assert application.partner_id == partner.id
+
+
+def test_suspending_an_application_cuts_off_portal_access():
+    from models import Partner, PartnerAccount, PartnerApplication
+    app = make_app(); client = app.test_client()
+    partner_id, account_id = _approved_partner(app, "Sound Hauling", "+12069440030")
+    with app.app_context():
+        application_id = PartnerApplication.query.filter_by(
+            partner_id=partner_id).one().id
+    csrf = _login(client)
+    client.post(f"/admin/partner-applications/{application_id}",
+                data={"csrf_token": csrf, "action": "suspend",
+                      "admin_message": "Unresolved complaints"})
+    with app.app_context():
+        assert PartnerAccount.query.get(account_id).active is False
+        assert Partner.query.get(partner_id).active is False
+
+    partner_client = app.test_client()
+    _sign_in(partner_client, account_id)
+    assert partner_client.get("/partner/").status_code == 302
+
+
+def test_assigning_an_ineligible_partner_is_blocked_until_confirmed():
+    """The core of section 9: never a silent assignment, never a hard block."""
+    from models import LeadAssignment
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app, service_zips="99999")   # wrong area
+    _lead_on(app, 2)
+    csrf = _login(client)
+
+    blocked = client.post("/admin/leads/1/assign", data={
+        "csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+    assert blocked.status_code == 400
+    page = blocked.get_data(as_text=True)
+    assert "not in service area" in page          # names the actual problem
+    assert "Assign anyway" in page
+    with app.app_context():
+        assert LeadAssignment.query.count() == 0  # nothing happened
+
+    confirmed = client.post("/admin/leads/1/assign", data={
+        "csrf_token": csrf, "partner_id": partner_id, "lead_price": "35",
+        "confirm_override": "yes"})
+    assert confirmed.status_code == 302
+    with app.app_context():
+        a = LeadAssignment.query.one()
+        assert a.assigned_with_override is True
+        assert "service area" in a.override_reasons
+        assert LeadActivity.query.filter_by(event_type="assignment.blocked").count() == 1
+        assert LeadActivity.query.filter_by(event_type="assignment.created").count() == 1
+
+
+def test_eligible_partner_assigns_without_an_override():
+    from models import LeadAssignment, PartnerNotification
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    csrf = _login(client)
+    response = client.post("/admin/leads/1/assign", data={
+        "csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+    assert response.status_code == 302
+    with app.app_context():
+        a = LeadAssignment.query.one()
+        assert a.assigned_with_override is False
+        assert a.status == "assigned"
+        # The notification must not carry customer details.
+        note = PartnerNotification.query.one()
+        assert "Ismail" not in note.message and "2069440030" not in note.message
+        assert Lead.query.get(1).partner_id == partner_id
+
+
+def test_assign_panel_sorts_and_labels_every_partner():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    _partner_with_schedule(app)
+    _lead_on(app, 2)
+    csrf = _login(client)
+    page = client.get("/admin/leads/1/assign").get_data(as_text=True)
+    assert "Eligible" in page
+    # Readable text, not colour alone.
+    assert "ZIP coverage" in page and "Credit balance" in page
+    assert "Daily lead limit" in page and "Service match" in page
+
+
+def test_deleting_a_lead_requires_typing_delete():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    csrf = _login(client)
+
+    for wrong in ("", "delete please", "yes"):
+        client.post("/admin/leads/1/delete",
+                    data={"csrf_token": csrf, "confirm_text": wrong})
+        with app.app_context():
+            assert Lead.query.count() == 1, wrong
+
+    client.post("/admin/leads/1/delete",
+                data={"csrf_token": csrf, "confirm_text": "DELETE"})
+    with app.app_context():
+        assert Lead.query.count() == 0
+
+
+def test_removing_an_assignment_is_recorded():
+    from models import LeadAssignment
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    csrf = _login(client)
+    client.post("/admin/leads/1/assign",
+                data={"csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+    with app.app_context():
+        assignment_id = LeadAssignment.query.one().id
+    client.post("/admin/leads/1/unassign",
+                data={"csrf_token": csrf, "assignment_id": assignment_id})
+    with app.app_context():
+        assert LeadAssignment.query.count() == 0
+        assert Lead.query.get(1).partner_id is None
+        assert LeadActivity.query.filter_by(event_type="assignment.removed").count() == 1

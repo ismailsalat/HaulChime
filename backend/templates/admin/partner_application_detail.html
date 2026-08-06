@@ -1,0 +1,75 @@
+{% extends "admin/base.html" %}{% block title %}{{ a.business_name }}{% endblock %}
+{% block content %}
+<p class="small"><a href="{{ url_for('admin.partner_applications') }}">&larr; All applications</a></p>
+<h1>{{ a.business_name }}
+  <span class="badge {{ 'green' if a.status=='approved' else ('red' if a.status in ['rejected','suspended'] else 'amber') }}">
+    {{ a.status|replace('_',' ')|capitalize }}</span></h1>
+
+<div class="card"><h2>What they told us</h2>
+  <div class="fieldrow">
+    <p class="kv"><span class="k">Contact</span><br><span class="v">{{ a.contact_person or '—' }}</span></p>
+    <p class="kv"><span class="k">Email</span><br><span class="v">{{ a.email or '—' }}</span></p>
+    <p class="kv"><span class="k">Phone</span><br><span class="v">{{ a.phone }}
+      {% if a.phone_verified %}<span class="badge green">Verified</span>{% else %}<span class="badge red">Unverified</span>{% endif %}</span></p>
+    <p class="kv"><span class="k">Crew size</span><br><span class="v">{{ a.crew_size or '—' }}</span></p>
+    <p class="kv"><span class="k">Truck</span><br><span class="v">{{ a.truck_capacity or '—' }}</span></p>
+    <p class="kv"><span class="k">Capabilities</span><br><span class="v">
+      {{ 'Heavy items' if a.heavy_item_capable else 'No heavy items' }} ·
+      {{ 'Commercial' if a.commercial_capable else 'Residential only' }}</span></p>
+  </div>
+  <p class="kv"><span class="k">Services</span><br><span class="v">{{ a.services_accepted|replace(',', ', ')|replace('_',' ') }}</span></p>
+  <p class="kv"><span class="k">ZIP codes</span><br><span class="v">{{ a.zip_codes|replace(',', ', ') }}</span></p>
+  {% if a.minimum_job_requirements %}<p class="kv"><span class="k">Minimum job</span><br><span class="v">{{ a.minimum_job_requirements }}</span></p>{% endif %}
+  {% if a.jobs_not_accepted %}<p class="kv"><span class="k">Won't accept</span><br><span class="v">{{ a.jobs_not_accepted }}</span></p>{% endif %}
+  <p class="kv"><span class="k">Notice needed</span><br><span class="v">{{ a.minimum_notice_hours }} hours</span></p>
+  {% if schedule %}
+  <p class="kv"><span class="k">Weekly availability</span><br><span class="v">
+    {% for d in schedule %}{{ DAY_NAMES[d.day] if DAY_NAMES is defined else d.day }}:
+      {{ (d.start ~ '–' ~ d.end) if d.available else 'unavailable' }}{{ '' if loop.last else ' · ' }}{% endfor %}
+  </span></p>
+  {% endif %}
+</div>
+
+{% if a.status != 'approved' %}
+<div class="card" style="border:2px solid #18794e">
+  <h2>Approve and set their terms</h2>
+  <p class="hint">These are yours to set — the applicant never sees or controls them. Approving creates the partner record and lets them sign in.</p>
+  <form method="post" data-confirm="Approve {{ a.business_name }}? This creates their partner record and gives them portal access.">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="approve">
+    <div class="fieldrow">
+      <div><label>Starting credit ($)</label><input name="credit_balance" inputmode="decimal" value="0"></div>
+      <div><label>Maximum lead price ($)</label><input name="max_lead_price" inputmode="decimal" value="70"></div>
+      <div><label>Default per-lead price ($)</label><input name="price_per_lead" inputmode="decimal" value="40"></div>
+      <div><label>Daily lead limit</label><input name="daily_lead_limit" inputmode="numeric" value="10"></div>
+    </div>
+    <label class="checkline"><input type="checkbox" name="active" checked> Partner is active immediately</label>
+    <label>Internal notes (never shown to the partner)</label>
+    <textarea name="internal_notes" rows="2"></textarea>
+    <button type="submit" class="btn">Approve partner</button>
+  </form>
+</div>
+{% endif %}
+
+<div class="card">
+  <h2>Other decisions</h2>
+  <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Message to the applicant (optional, shown to them)</label>
+    <textarea name="admin_message" rows="2">{{ a.admin_message or '' }}</textarea>
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">
+      <button type="submit" name="action" value="request_changes" class="btn btn-secondary"
+              data-confirm="Ask {{ a.business_name }} to make changes? They'll be able to edit and resubmit.">Request changes</button>
+      <button type="submit" name="action" value="reject" class="btn btn-secondary"
+              data-confirm="Reject {{ a.business_name }}? They will not be able to access the portal.">Reject</button>
+      {% if a.status == 'approved' %}
+      <button type="submit" name="action" value="suspend" class="linkbtn danger"
+              data-confirm="Suspend {{ a.business_name }}? They lose portal access immediately and stop receiving leads.">Suspend partner</button>
+      {% elif a.status == 'suspended' %}
+      <button type="submit" name="action" value="reactivate" class="btn btn-secondary"
+              data-confirm="Reactivate {{ a.business_name }}? They regain portal access and can receive leads.">Reactivate</button>
+      {% endif %}
+    </div>
+  </form>
+</div>
+{% endblock %}

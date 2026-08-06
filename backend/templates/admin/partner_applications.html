@@ -1,0 +1,34 @@
+{% extends "admin/base.html" %}{% block title %}Partner applications{% endblock %}
+{% block content %}
+<h1>Partner applications</h1>
+<p class="muted">
+  <a href="{{ url_for('admin.partner_applications') }}">All ({{ counts.values()|sum }})</a>
+  {% for s, n in counts.items() %} &middot;
+  <a href="{{ url_for('admin.partner_applications', status=s) }}">{{ s|replace('_',' ')|capitalize }} ({{ n }})</a>
+  {% endfor %}
+</p>
+{% for a in applications %}
+<div class="card">
+  <div style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:baseline">
+    <h2 style="margin:0"><a href="{{ url_for('admin.partner_application_detail', application_id=a.id) }}">{{ a.business_name }}</a></h2>
+    <span class="badge {{ 'green' if a.status=='approved' else ('red' if a.status in ['rejected','suspended'] else 'amber') }}">
+      {{ a.status|replace('_',' ')|capitalize }}</span>
+  </div>
+  <p class="muted small" style="margin:6px 0 0">
+    {{ a.contact_person or 'No contact name' }} &middot; {{ a.email or 'no email' }} &middot;
+    {% if a.phone_verified %}<span style="color:#18794e;font-weight:800">&#10003; Phone verified</span>
+    {% else %}<span style="color:#b42318;font-weight:800">Phone not verified</span>{% endif %}
+  </p>
+  <p class="muted small" style="margin:6px 0 0">
+    Services: {{ a.services_accepted|replace(',', ', ')|replace('_',' ') or '&mdash;' }}<br>
+    ZIPs: {{ a.zip_codes|replace(',', ', ') or '&mdash;' }}<br>
+    Crew {{ a.crew_size or '?' }} &middot; {{ a.truck_capacity or 'truck not stated' }}
+    {%- if a.heavy_item_capable %} &middot; heavy-item capable{% endif %}
+    {%- if a.commercial_capable %} &middot; commercial{% endif %}<br>
+    Applied {{ a.submitted_at.strftime('%b %d, %Y') if a.submitted_at else '&mdash;' }}
+  </p>
+</div>
+{% else %}
+<div class="card"><p class="muted">No applications yet. Companies apply at <code>/partner/apply</code>.</p></div>
+{% endfor %}
+{% endblock %}

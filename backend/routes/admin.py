@@ -711,6 +711,11 @@ def delete_lead(lead_id):
     One tombstone audit row (with no personal data) records that the
     deletion happened, who did it and when."""
     check_csrf()
+    # Typed confirmation, verified here rather than only in the browser: a
+    # JavaScript dialog can be bypassed, and this cannot be undone.
+    if (request.form.get("confirm_text") or "").strip().upper() != "DELETE":
+        flash("Type DELETE in the box to confirm. Nothing was deleted.", "error")
+        return redirect(url_for("admin.lead_detail", lead_id=lead_id))
     lead = Lead.query.get_or_404(lead_id)
     ref = lead.reference
     # Remove stored photos
@@ -840,3 +845,9 @@ def settings():
     }
     return render_template("admin/settings.html", general=general,
                            integrations=integrations, sms=sms, storage=storage)
+
+
+# Partner applications and eligibility-aware lead assignment live in their own
+# module to keep this file readable; they share this blueprint, login and CSRF.
+from routes import admin_partners  # noqa: E402
+admin_partners.register(bp, login_required, check_csrf)
