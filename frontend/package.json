@@ -7,6 +7,10 @@
     "build": "node build.js",
     "start": "node build.js && node server.js",
     "build:prod": "node build.js --prod",
-    "deploy": "node build.js --prod && firebase deploy --only hosting"
+    "deploy": "node build.js --prod && firebase deploy --only hosting",
+    "test": "node build.js --prod && node test/quote-form.test.js"
+  },
+  "devDependencies": {
+    "jsdom": "^30.0.1"
   }
 }
