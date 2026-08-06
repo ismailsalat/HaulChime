@@ -1,0 +1,68 @@
+{% extends "partner/base.html" %}{% set active='availability' %}
+{% block title %}Availability | HaulChime Partner{% endblock %}
+{% block body %}
+<h1>Availability</h1>
+<p class="muted small" style="margin-top:0">When you can <strong>do the job</strong> — not just answer the phone. We only assign leads that fit these hours.</p>
+
+<div class="card">
+  <form method="post" data-confirm="Save your weekly schedule?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="weekly">
+    <h2>Weekly schedule</h2>
+    {% for row in schedule %}
+    <div class="day">
+      <label class="check" style="margin:0">
+        <input type="checkbox" name="available_{{ loop.index0 }}" {{ 'checked' if row.available }}>
+        <span>{{ DAY_NAMES[loop.index0] }}</span>
+      </label>
+      <div class="times">
+        <input type="time" name="start_{{ loop.index0 }}" value="{{ row.start_time or '08:00' }}" aria-label="{{ DAY_NAMES[loop.index0] }} start">
+        <input type="time" name="end_{{ loop.index0 }}" value="{{ row.end_time or '17:00' }}" aria-label="{{ DAY_NAMES[loop.index0] }} end">
+      </div>
+    </div>
+    {% endfor %}
+    <div class="field" style="margin-top:18px">
+      <label for="notice">How much notice do you need?</label>
+      <select id="notice" name="minimum_notice_hours">
+        {% for h, t in [(0,'Same-day jobs are okay'),(24,'At least 24 hours'),(48,'At least 48 hours'),(72,'At least 3 days')] %}
+        <option value="{{ h }}" {{ 'selected' if partner.minimum_notice_hours == h }}>{{ t }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <label class="check"><input type="checkbox" name="same_day_ok" {{ 'checked' if partner.same_day_ok }}>
+      <span>I can take same-day work when I'm free</span></label>
+    <button class="btn" type="submit">Save schedule</button>
+  </form>
+</div>
+
+<div class="card">
+  <h2>Time off</h2>
+  <p class="muted small">We won't assign jobs inside these dates.</p>
+  {% for t in time_off %}
+  <div class="row" style="padding:11px 0;border-bottom:1px solid var(--line)">
+    <div><strong>{{ t.start_date }} &rarr; {{ t.end_date }}</strong>
+      {% if t.note %}<br><span class="muted small">{{ t.note }}</span>{% endif %}</div>
+    <form method="post" data-confirm="Remove this time off? We may start assigning jobs in that window again.">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="action" value="delete_time_off">
+      <input type="hidden" name="time_off_id" value="{{ t.id }}">
+      <button class="btn danger inline" type="submit" style="padding:9px 16px;min-height:40px">Remove</button>
+    </form>
+  </div>
+  {% else %}<p class="muted small">No time off booked.</p>{% endfor %}
+
+  <form method="post" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="action" value="time_off">
+    <div class="day" style="border:0;padding:0">
+      <div class="field"><label for="start_date">From</label>
+        <input id="start_date" type="date" name="start_date" min="{{ today }}" required></div>
+      <div class="field"><label for="end_date">Until</label>
+        <input id="end_date" type="date" name="end_date" min="{{ today }}" required></div>
+    </div>
+    <div class="field"><label for="note">Note (optional)</label>
+      <input id="note" type="text" name="note" maxlength="255" placeholder="Vacation"></div>
+    <button class="btn secondary" type="submit">Add time off</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,106 @@
+<!doctype html><html lang="en"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>{% block title %}HaulChime Partner{% endblock %}</title>
+<style>
+  :root{--ink:#111820;--muted:#64707d;--paper:#f7f3ea;--orange:#ff5a1f;--orange-dark:#dd4310;
+        --line:#dcd6ca;--green:#186c39;--red:#b42318;--amber:#b54708}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--paper);color:var(--ink);
+       font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Inter,Roboto,sans-serif;
+       -webkit-font-smoothing:antialiased;padding-bottom:env(safe-area-inset-bottom)}
+  a{color:var(--orange-dark)}
+  .shell{max-width:720px;margin:0 auto;padding:0 16px}
+  header.bar{background:#fff;border-bottom:1px solid var(--line);padding:14px 0;position:sticky;top:0;z-index:20}
+  header.bar .shell{display:flex;align-items:center;justify-content:space-between;gap:12px}
+  .brand{font-weight:950;letter-spacing:-.02em;font-size:1.05rem;text-decoration:none;color:var(--ink)}
+  .brand small{display:block;font-weight:700;font-size:.7rem;color:var(--muted);letter-spacing:.06em;text-transform:uppercase}
+  nav.tabs{background:#fff;border-bottom:1px solid var(--line);overflow-x:auto;-webkit-overflow-scrolling:touch}
+  nav.tabs .shell{display:flex;gap:4px;padding:0 8px}
+  nav.tabs a{flex:1 0 auto;text-align:center;padding:13px 14px;font-weight:800;font-size:.85rem;
+             color:var(--muted);text-decoration:none;border-bottom:3px solid transparent;white-space:nowrap;min-height:48px}
+  nav.tabs a.on{color:var(--ink);border-bottom-color:var(--orange)}
+  nav.tabs a .dot{display:inline-block;min-width:19px;height:19px;line-height:19px;border-radius:99px;
+                  background:var(--orange);color:#fff;font-size:.66rem;margin-left:5px;padding:0 5px}
+  main{padding:22px 0 60px}
+  h1{font-size:1.5rem;letter-spacing:-.02em;margin:0 0 6px}
+  h2{font-size:1.05rem;margin:0 0 12px}
+  .card{background:#fff;border:1px solid var(--line);border-radius:18px;padding:20px;margin-bottom:16px}
+  .card h2{margin-top:0}
+  .muted{color:var(--muted)}
+  .small{font-size:.85rem}
+  .row{display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap}
+  .stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px}
+  .stats div{background:#fff;border:1px solid var(--line);border-radius:14px;padding:14px;text-align:center}
+  .stats b{display:block;font-size:1.5rem;line-height:1.2}
+  .stats span{font-size:.72rem;color:var(--muted);font-weight:800;text-transform:uppercase;letter-spacing:.05em}
+  .btn{display:inline-flex;align-items:center;justify-content:center;gap:8px;background:var(--orange);
+       color:#fff;border:0;border-radius:999px;padding:15px 24px;font-weight:850;font-size:.95rem;
+       cursor:pointer;text-decoration:none;min-height:50px;width:100%;margin-top:4px}
+  .btn:hover{background:var(--orange-dark)}
+  .btn.secondary{background:#fff;color:var(--ink);border:1.5px solid var(--line)}
+  .btn.danger{background:#fff;color:var(--red);border:1.5px solid #f2b8b5}
+  .btn.inline{width:auto}
+  .btn-row{display:grid;gap:10px;margin-top:16px}
+  @media(min-width:520px){.btn-row.two{grid-template-columns:1fr 1fr}}
+  .badge{display:inline-block;font-size:.68rem;font-weight:900;text-transform:uppercase;
+         letter-spacing:.06em;padding:5px 10px;border-radius:999px;background:#efe9de;color:#5b6670}
+  .badge.new{background:#fff0e9;color:var(--orange-dark)}
+  .badge.ok{background:#e8f6ed;color:var(--green)}
+  .badge.warn{background:#fff5e6;color:var(--amber)}
+  .badge.off{background:#fdecea;color:var(--red)}
+  .lead{display:block;background:#fff;border:1px solid var(--line);border-radius:16px;padding:18px;
+        margin-bottom:12px;text-decoration:none;color:inherit}
+  .lead:hover{border-color:var(--orange)}
+  .lead b{font-size:1.05rem;display:block;margin:6px 0 3px}
+  .lead .meta{color:var(--muted);font-size:.87rem;line-height:1.5}
+  .kv{display:grid;grid-template-columns:1fr;gap:2px;padding:11px 0;border-bottom:1px solid var(--line)}
+  .kv:last-child{border-bottom:0}
+  .kv span{font-size:.72rem;color:var(--muted);font-weight:850;text-transform:uppercase;letter-spacing:.05em}
+  .kv strong{font-weight:750;overflow-wrap:anywhere}
+  label{display:block;font-weight:800;font-size:.86rem;margin:0 0 7px}
+  input[type=text],input[type=tel],input[type=email],input[type=number],input[type=date],
+  input[type=time],select,textarea{width:100%;border:1.5px solid var(--line);border-radius:12px;
+       padding:14px;font-size:16px;background:#fff;color:var(--ink);outline:0;font-family:inherit}
+  input:focus,select:focus,textarea:focus{border-color:var(--orange);box-shadow:0 0 0 3px rgba(255,90,31,.13)}
+  textarea{min-height:90px;resize:vertical}
+  .field{margin-bottom:16px}
+  .check{display:flex;align-items:flex-start;gap:11px;margin:12px 0;font-weight:700;font-size:.92rem}
+  .check input{width:21px;height:21px;flex:0 0 auto;accent-color:var(--orange);margin:1px 0 0}
+  .day{display:grid;grid-template-columns:1fr;gap:8px;padding:14px 0;border-bottom:1px solid var(--line)}
+  @media(min-width:520px){.day{grid-template-columns:1.1fr 1fr 1fr;align-items:center;gap:12px}}
+  .day .times{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+  @media(min-width:520px){.day .times{display:contents}}
+  .flash{padding:14px 16px;border-radius:14px;margin-bottom:14px;font-weight:750;font-size:.9rem}
+  .flash.ok{background:#e8f6ed;color:var(--green);border:1px solid #bfe6c8}
+  .flash.error{background:#fdecea;color:var(--red);border:1px solid #f2b8b5}
+  .flash.warn{background:#fff5e6;color:var(--amber);border:1px solid #f3d9a8}
+  .otp{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;max-width:330px}
+  .otp input{text-align:center;font-size:1.3rem;font-weight:850;padding:14px 0}
+  .locked{background:#f6f7f8;border:1px dashed #cdd4d9;border-radius:14px;padding:18px;text-align:center;color:var(--muted);font-size:.88rem}
+</style>
+</head><body>
+<header class="bar"><div class="shell">
+  <a class="brand" href="{{ url_for('partner.home') }}">HaulChime<small>Partner portal</small></a>
+  {% if partner %}<a class="small" href="{{ url_for('partner.logout') }}">Sign out</a>{% endif %}
+</div></header>
+{% if partner %}
+<nav class="tabs"><div class="shell">
+  <a href="{{ url_for('partner.home') }}" class="{{ 'on' if active=='home' }}">Home</a>
+  <a href="{{ url_for('partner.leads') }}" class="{{ 'on' if active=='leads' }}">My Leads{% if unread_count %}<span class="dot">{{ unread_count }}</span>{% endif %}</a>
+  <a href="{{ url_for('partner.availability') }}" class="{{ 'on' if active=='availability' }}">Availability</a>
+  <a href="{{ url_for('partner.profile') }}" class="{{ 'on' if active=='profile' }}">Profile</a>
+</div></nav>
+{% endif %}
+<main><div class="shell">
+  {% with msgs = get_flashed_messages(with_categories=true) %}{% for cat,msg in msgs %}
+    <p class="flash {{ cat }}">{{ msg }}</p>{% endfor %}{% endwith %}
+  {% block body %}{% endblock %}
+</div></main>
+<script>
+document.addEventListener('submit', function(e){
+  var m = (e.submitter && e.submitter.getAttribute('data-confirm')) || e.target.getAttribute('data-confirm');
+  if (m && !window.confirm(m)) { e.preventDefault(); e.stopPropagation(); }
+});
+</script>
+</body></html>

@@ -1,0 +1,46 @@
+{% extends "partner/base.html" %}{% set active='home' %}
+{% block title %}Home | HaulChime Partner{% endblock %}
+{% block body %}
+<h1>{{ partner.name }}</h1>
+<p class="muted small" style="margin-top:0">
+  {% if new %}You have {{ new|length }} new assigned lead{{ '' if new|length==1 else 's' }}.
+  {% else %}No new leads right now. We'll text you when one arrives.{% endif %}</p>
+
+<div class="stats">
+  <div><b>{{ new|length }}</b><span>New</span></div>
+  <div><b>{{ active|length }}</b><span>Active</span></div>
+  <div><b>{{ booked|length }}</b><span>Booked</span></div>
+</div>
+
+{% if new %}<a class="btn" href="{{ url_for('partner.leads') }}">View assigned leads</a>{% endif %}
+
+<div class="card" style="margin-top:16px">
+  <div class="row">
+    <div>
+      <h2 style="margin-bottom:4px">Lead status</h2>
+      {% if partner.taking_leads is not false %}
+        <span class="badge ok">Taking leads</span>
+      {% else %}
+        <span class="badge off">Paused</span>
+      {% endif %}
+    </div>
+  </div>
+  <p class="muted small">Pausing stops new leads reaching you. Leads you've already accepted are unaffected.</p>
+  <form method="post" action="{{ url_for('partner.toggle_leads') }}"
+        data-confirm="{{ 'Pause new leads? We will stop assigning work to you until you resume.' if partner.taking_leads is not false else 'Resume taking new leads?' }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button class="btn secondary" type="submit">
+      {{ 'Pause new leads' if partner.taking_leads is not false else 'Resume taking leads' }}</button>
+  </form>
+</div>
+
+{% for a in new[:5] %}{% set v = views[a.id] %}
+<a class="lead" href="{{ url_for('partner.lead_detail', reference=v.reference) }}">
+  <span class="badge new">New assigned lead</span>
+  <b>{{ v.service }}{% if v.job_type %} &middot; {{ v.job_type }}{% endif %}</b>
+  <span class="meta">{{ v.city }}{% if v.city %}, {% endif %}{{ v.zip_code }}<br>
+    {{ v.job_size }} &middot; {{ v.timing }}{% if v.photo_count %} &middot; {{ v.photo_count }} photo{{ '' if v.photo_count==1 else 's' }}{% endif %}
+    {% if v.lead_price != '0.00' %}<br>Lead price: ${{ v.lead_price }}{% endif %}</span>
+</a>
+{% endfor %}
+{% endblock %}

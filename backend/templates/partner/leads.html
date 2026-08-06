@@ -1,0 +1,21 @@
+{% extends "partner/base.html" %}{% set active='leads' %}
+{% block title %}My leads | HaulChime Partner{% endblock %}
+{% block body %}
+<h1>My leads</h1>
+{% for key, title in [('new','New'),('active','Active'),('closed','Closed')] %}
+  <h2 style="margin-top:24px">{{ title }} <span class="muted small">({{ groups[key]|length }})</span></h2>
+  {% if not groups[key] %}
+    <p class="muted small">Nothing here yet.</p>
+  {% endif %}
+  {% for a in groups[key] %}{% set v = views[a.id] %}
+  <a class="lead" href="{{ url_for('partner.lead_detail', reference=v.reference) }}">
+    <span class="badge {{ 'new' if key=='new' else ('ok' if key=='active' else '') }}">
+      {{ v.status|replace('_',' ')|title }}</span>
+    <b>{{ v.service }}{% if v.job_type %} &middot; {{ v.job_type }}{% endif %}</b>
+    <span class="meta">{{ v.city }}{% if v.city %}, {% endif %}{{ v.zip_code }}<br>
+      {{ v.job_size }} &middot; {{ v.timing }}
+      {% if v.lead_price != '0.00' %}&middot; ${{ v.lead_price }}{% endif %}</span>
+  </a>
+  {% endfor %}
+{% endfor %}
+{% endblock %}
