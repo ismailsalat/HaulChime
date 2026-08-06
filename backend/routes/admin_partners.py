@@ -286,6 +286,14 @@ def register(bp, login_required, check_csrf):
         db.session.add(PartnerActivity(
             partner_id=assignment.partner_id, lead_id=lead.id,
             event_type="lead.unassigned", old_value=assignment.status))
+        # Clear the ping too. A badge pointing at a lead the partner can no
+        # longer open is worse than no badge — they tap it and hit a 404.
+        PartnerNotification.query.filter_by(
+            partner_id=assignment.partner_id, lead_id=lead.id).delete()
+        # PartnerActivity rows reference the assignment; detach them so the
+        # partner's history survives but the delete isn't blocked.
+        PartnerActivity.query.filter_by(assignment_id=assignment.id).update(
+            {"assignment_id": None}, synchronize_session=False)
         db.session.delete(assignment)
         remaining = LeadAssignment.query.filter_by(lead_id=lead.id).count()
         if remaining <= 1:

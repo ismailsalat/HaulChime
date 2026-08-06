@@ -667,9 +667,16 @@ def photo(key):
     pre-signed URL. Either way the bucket itself stays private — these images
     show the inside of someone's home.
     """
-    import os.path
+    import os
     safe_key = os.path.basename(key)     # no traversal, whatever the router did
     if current_app.config["STORAGE_BACKEND"] == "local":
+        path = os.path.join(current_app.config["UPLOAD_DIR"], safe_key)
+        if not os.path.exists(path):
+            # Usually an ephemeral filesystem: photos written before a volume
+            # was attached don't survive a redeploy.
+            logger.warn("photo.missing_file", key=safe_key[:40],
+                        upload_dir=current_app.config["UPLOAD_DIR"])
+            return jsonify(error="Photo file is no longer on disk"), 404
         return send_from_directory(current_app.config["UPLOAD_DIR"], safe_key)
     try:
         from flask import redirect

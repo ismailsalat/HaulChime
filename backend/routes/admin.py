@@ -645,6 +645,24 @@ def delete_partner(partner_id):
     # or the delete is rejected. History is preserved; only the link is removed.
     LeadActivity.query.filter_by(contractor_id=p.id).update(
         {"contractor_id": None}, synchronize_session=False)
+
+    # The partner portal added seven tables that reference partners.id. Each
+    # one has to go, or Postgres rejects the delete exactly as it did for
+    # leads. Applications and activity are detached rather than destroyed so
+    # the record of who applied and what they did survives the account.
+    from models import (LeadAssignment, PartnerAccount, PartnerActivity,
+                        PartnerApplication, PartnerAvailability,
+                        PartnerNotification, PartnerTimeOff)
+    LeadAssignment.query.filter_by(partner_id=p.id).delete()
+    PartnerNotification.query.filter_by(partner_id=p.id).delete()
+    PartnerAvailability.query.filter_by(partner_id=p.id).delete()
+    PartnerTimeOff.query.filter_by(partner_id=p.id).delete()
+    PartnerAccount.query.filter_by(partner_id=p.id).delete()
+    PartnerActivity.query.filter_by(partner_id=p.id).update(
+        {"partner_id": None, "assignment_id": None}, synchronize_session=False)
+    PartnerApplication.query.filter_by(partner_id=p.id).update(
+        {"partner_id": None, "status": "rejected"}, synchronize_session=False)
+
     audit("admin.partner_deleted", actor_type="admin", actor_id=g.admin_user,
           previous_value=name, leads_unassigned=len(affected))
     try:
@@ -747,11 +765,24 @@ def delete_lead(lead_id):
         except OSError:
             pass
     activity_count = LeadActivity.query.filter_by(lead_id=lead.id).delete()
+
+    # Everything in the partner tables that points at this lead. Without this
+    # the delete fails on a foreign key, which is the 500 the admin saw.
+    from models import LeadAssignment, PartnerActivity, PartnerNotification
+    assignment_count = LeadAssignment.query.filter_by(lead_id=lead.id).delete()
+    PartnerNotification.query.filter_by(lead_id=lead.id).delete()
+    # Partner activity is the partner's own history, not the customer's, so it
+    # is detached rather than destroyed — otherwise deleting a lead quietly
+    # rewrites what a partner did.
+    PartnerActivity.query.filter_by(lead_id=lead.id).update(
+        {"lead_id": None, "assignment_id": None})
+
     db.session.delete(lead)
     db.session.flush()
     audit("admin.lead_deleted", None, actor_type="admin", actor_id=g.admin_user,
           lead_reference=ref, previous_value=ref,
-          activity_rows_removed=activity_count)
+          activity_rows_removed=activity_count,
+          assignments_removed=assignment_count)
     db.session.commit()
     flash(f"Lead {ref} and its history were permanently deleted.", "ok")
     return redirect(url_for("admin.leads"))

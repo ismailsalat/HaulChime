@@ -107,6 +107,20 @@ def create_app(config_object=Config):
 
     db.init_app(app)
 
+    # SQLite ignores foreign keys unless you ask it not to. Production runs on
+    # Postgres, which enforces them strictly — so without this a delete that
+    # orphans a row passes every local test and 500s in production. That is
+    # exactly how "delete lead" shipped broken.
+    from sqlalchemy import event
+    from sqlalchemy.engine import Engine
+
+    @event.listens_for(Engine, "connect")
+    def _enforce_sqlite_foreign_keys(dbapi_connection, _record):
+        if "sqlite3" in type(dbapi_connection).__module__:
+            cursor = dbapi_connection.cursor()
+            cursor.execute("PRAGMA foreign_keys=ON")
+            cursor.close()
+
     from routes.public import bp as public_bp
     from routes.admin import bp as admin_bp
     from routes.verification import bp as verification_bp

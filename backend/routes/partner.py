@@ -469,7 +469,7 @@ def lead_photo(reference, key):
     partner with one valid assignment could read every photo in the bucket by
     swapping the key.
     """
-    import os.path
+    import os
     from flask import redirect, send_from_directory
     from storage import get_storage
     assignment = assignment_or_404(reference)
@@ -478,12 +478,35 @@ def lead_photo(reference, key):
         abort(404)
     cfg = current_app.config
     if cfg["STORAGE_BACKEND"] == "local":
+        path = os.path.join(cfg["UPLOAD_DIR"], safe_key)
+        if not os.path.exists(path):
+            # The row says there is a photo but the file is gone. Almost always
+            # an ephemeral filesystem: photos written before a volume was
+            # attached do not survive a redeploy. A labelled tile is far more
+            # use to the partner than a broken image icon.
+            logger.warn("partner.photo_missing", key=safe_key[:40],
+                        upload_dir=cfg["UPLOAD_DIR"])
+            return _photo_placeholder()
         return send_from_directory(cfg["UPLOAD_DIR"], safe_key)
     try:
         return redirect(get_storage(cfg).url_for(safe_key), code=302)
     except Exception:
         logger.error("partner.photo_failed", exc_info=True)
-        abort(404)
+        return _photo_placeholder()
+
+
+def _photo_placeholder():
+    """A grey tile that says what happened, served with 200 so the browser
+    renders it instead of showing its own broken-image glyph."""
+    from flask import Response
+    svg = ("<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 160 160' "
+           "width='160' height='160'><rect width='160' height='160' fill='#eef1f4'/>"
+           "<text x='80' y='74' text-anchor='middle' font-family='sans-serif' "
+           "font-size='13' fill='#6b7885'>Photo</text>"
+           "<text x='80' y='92' text-anchor='middle' font-family='sans-serif' "
+           "font-size='13' fill='#6b7885'>unavailable</text></svg>")
+    return Response(svg, mimetype="image/svg+xml",
+                    headers={"Cache-Control": "no-store"})
 
 
 # ------------------------------------------------------------- availability

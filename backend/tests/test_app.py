@@ -1619,3 +1619,131 @@ def test_a_partner_without_enough_crew_is_flagged():
     crew_failure = [f for f in result["failures"] if "Crew" in f]
     assert crew_failure, result["failures"]
     assert "has 2" in crew_failure[0] and "needs" in crew_failure[0]
+
+
+def test_deleting_an_assigned_lead_removes_everything_that_points_at_it():
+    """The partner tables reference leads.id. Without cleaning them up first,
+    deleting an assigned lead violates a foreign key and 500s."""
+    from models import LeadAssignment, PartnerActivity, PartnerNotification
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    csrf = _login(client)
+    client.post("/admin/leads/1/assign",
+                data={"csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+    with app.app_context():
+        assert LeadAssignment.query.count() == 1
+        assert PartnerNotification.query.count() == 1
+
+    response = client.post("/admin/leads/1/delete",
+                           data={"csrf_token": csrf, "confirm_text": "DELETE"},
+                           follow_redirects=True)
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Something went wrong" not in body
+    assert "permanently deleted" in body
+
+    with app.app_context():
+        assert Lead.query.count() == 0
+        assert LeadAssignment.query.count() == 0
+        assert PartnerNotification.query.count() == 0
+        # Partner activity survives but is detached, so the partner's history
+        # doesn't vanish with the customer's data.
+        for row in PartnerActivity.query.all():
+            assert row.lead_id is None
+
+
+def test_unassigning_clears_the_partners_notification_badge():
+    """A ping for a lead the partner can no longer open is worse than no ping."""
+    from models import LeadAssignment, PartnerNotification
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    csrf = _login(client)
+    client.post("/admin/leads/1/assign",
+                data={"csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+    with app.app_context():
+        assignment_id = LeadAssignment.query.one().id
+        assert PartnerNotification.query.filter_by(read=False).count() == 1
+
+    client.post("/admin/leads/1/unassign",
+                data={"csrf_token": csrf, "assignment_id": assignment_id})
+    with app.app_context():
+        assert PartnerNotification.query.filter_by(
+            partner_id=partner_id, lead_id=1, read=False).count() == 0
+
+
+def test_partner_can_actually_load_a_photo_on_their_lead():
+    """The portal renders an <img>; if the route 404s the partner sees a
+    broken image and cannot judge the job."""
+    import io
+    from PIL import Image
+    app = make_app(); client = app.test_client()
+    data = dict(valid_payload())
+    buf = io.BytesIO()
+    Image.new("RGB", (50, 50), "blue").save(buf, format="JPEG")
+    buf.seek(0)
+    data["photos"] = (buf, "sofa.jpg")
+    client.post("/api/leads", data=data, content_type="multipart/form-data")
+
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first()
+        reference, key, lead_id = lead.reference, lead.photos[0], lead.id
+    _assign(app, lead_id, partner_id)
+    _sign_in(client, account_id)
+
+    page = client.get(f"/partner/leads/{reference}").get_data(as_text=True)
+    assert f"/partner/leads/{reference}/photos/{key}" in page, "no photo URL rendered"
+
+    response = client.get(f"/partner/leads/{reference}/photos/{key}")
+    assert response.status_code == 200, f"photo route returned {response.status_code}"
+    assert response.data[:2] == b"\xff\xd8"        # a real JPEG, not an error page
+
+
+def test_deleting_a_partner_with_a_full_history_succeeds():
+    """Seven tables reference partners.id. Deleting one that has an account,
+    schedule, assignment and notification must not fail on a foreign key."""
+    from models import (LeadAssignment, PartnerAccount, PartnerActivity,
+                        PartnerApplication, PartnerAvailability,
+                        PartnerNotification, PartnerTimeOff, Partner)
+    from datetime import date, timedelta
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app, "Doomed Co", "+12065550199")
+    with app.app_context():
+        db.session.add(PartnerAvailability(partner_id=partner_id, day_of_week=1,
+                                           available=True))
+        db.session.add(PartnerTimeOff(partner_id=partner_id,
+                                      start_date=date.today(),
+                                      end_date=date.today() + timedelta(days=2)))
+        db.session.add(PartnerNotification(partner_id=partner_id, lead_id=1,
+                                           title="New lead"))
+        db.session.add(PartnerActivity(partner_id=partner_id, lead_id=1,
+                                       event_type="lead.viewed"))
+        db.session.commit()
+    _assign(app, 1, partner_id)
+
+    csrf = _login(client)
+    response = client.post(f"/admin/partners/{partner_id}/delete",
+                           data={"csrf_token": csrf}, follow_redirects=True)
+    assert response.status_code == 200
+    body = response.get_data(as_text=True)
+    assert "Couldn't delete" not in body and "Something went wrong" not in body
+
+    with app.app_context():
+        assert Partner.query.get(partner_id) is None
+        assert PartnerAccount.query.filter_by(partner_id=partner_id).count() == 0
+        assert PartnerAvailability.query.filter_by(partner_id=partner_id).count() == 0
+        assert PartnerTimeOff.query.filter_by(partner_id=partner_id).count() == 0
+        assert LeadAssignment.query.filter_by(partner_id=partner_id).count() == 0
+        assert PartnerNotification.query.filter_by(partner_id=partner_id).count() == 0
+        # History is detached, not destroyed.
+        assert PartnerActivity.query.count() >= 1
+        # The application survives as a record of who applied.
+        assert PartnerApplication.query.count() == 1
+        # And the lead itself is untouched, just unassigned.
+        assert Lead.query.get(1) is not None
+        assert Lead.query.get(1).partner_id is None
