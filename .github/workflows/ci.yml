@@ -37,7 +37,7 @@ jobs:
         with:
           node-version: '24'
       - name: Build the static site
-        run: node build.js
+        run: node build.js --prod
       - name: Check the quote app parses
         run: node -e "new Function(require('fs').readFileSync('dist/js/main.js','utf8'))"
       - name: Install test dependencies
