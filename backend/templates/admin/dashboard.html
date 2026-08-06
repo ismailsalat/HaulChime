@@ -17,13 +17,17 @@
 </div>
 {% set attn_total = attn.review + attn.unassigned + attn.failed_deliveries + attn.no_partner_area + partners_over|length %}
 <div class="card"><h2>Needs attention</h2>
-{% if attn_total == 0 %}<p class="empty" style="padding:12px">Nothing needs attention right now.</p>{% else %}
-<ul style="margin:0;padding-left:20px;line-height:2">
-{% if attn.review %}<li><a href="{{ url_for('admin.leads', status='validation_needed') }}">{{ attn.review }} lead(s) waiting for review</a></li>{% endif %}
-{% if attn.unassigned %}<li><a href="{{ url_for('admin.leads', status='new') }}">{{ attn.unassigned }} lead(s) not assigned</a></li>{% endif %}
-{% if attn.no_partner_area %}<li><a href="{{ url_for('admin.leads', status='outside_service_area') }}">{{ attn.no_partner_area }} lead(s) outside partner coverage</a></li>{% endif %}
-{% if attn.failed_deliveries %}<li><a href="{{ url_for('admin.logs', tab='activity', errors_only=1) }}">{{ attn.failed_deliveries }} failed notification(s)</a></li>{% endif %}
-</ul>{% endif %}</div>
+{% if attn_total == 0 %}
+  <p class="attn-clear"><span class="dot good"></span>Nothing needs attention right now.</p>
+{% else %}
+<ul class="attn">
+{% if attn.review %}<li><span class="dot warn"></span><a href="{{ url_for('admin.leads', status='validation_needed') }}">{{ attn.review }} lead{{ '' if attn.review == 1 else 's' }} waiting for review</a></li>{% endif %}
+{% if attn.unassigned %}<li><span class="dot warn"></span><a href="{{ url_for('admin.leads', status='new') }}">{{ attn.unassigned }} lead{{ '' if attn.unassigned == 1 else 's' }} not assigned to a partner</a></li>{% endif %}
+{% if attn.no_partner_area %}<li class="bad"><span class="dot bad"></span><a href="{{ url_for('admin.leads', status='outside_service_area') }}">{{ attn.no_partner_area }} lead{{ '' if attn.no_partner_area == 1 else 's' }} outside partner coverage</a></li>{% endif %}
+{% if attn.failed_deliveries %}<li class="bad"><span class="dot bad"></span><a href="{{ url_for('admin.logs', tab='activity', errors_only=1) }}">{{ attn.failed_deliveries }} notification{{ '' if attn.failed_deliveries == 1 else 's' }} failed to send</a></li>{% endif %}
+{% for p in partners_over %}<li class="bad"><span class="dot bad"></span>{{ p.name }} is over their daily lead limit</li>{% endfor %}
+</ul>
+{% endif %}</div>
 <div class="table-card"><table><caption style="text-align:left;padding:14px 12px 4px;font-weight:700">Recent leads</caption>
 <tr><th>Customer</th><th>Service</th><th>Tier</th><th>ZIP</th><th>Status</th><th class="hide-sm">Created</th><th></th></tr>
 {% for l in recent %}<tr class="rowlink" onclick="location='{{ url_for('admin.lead_detail', lead_id=l.id) }}'">

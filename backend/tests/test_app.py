@@ -1354,7 +1354,7 @@ def test_admin_buttons_use_the_shared_styles():
     import pathlib
     bad = []
     for template in pathlib.Path("templates/admin").glob("*.html"):
-        text = template.read_text()
+        text = template.read_text(encoding="utf-8")
         for match in re.finditer(r'<button(?![^>]*class=)[^>]*>', text):
             bad.append(f"{template.name}: {match.group(0)[:60]}")
     assert not bad, "unstyled buttons:\n" + "\n".join(bad)
@@ -1438,3 +1438,45 @@ def test_partner_owning_the_gear_is_not_charged_to_hire_it():
     assert owned["costs"]["special_equipment"] < hired["costs"]["special_equipment"]
     assert owned["costs"]["special_equipment"] > 0        # consumables remain
     assert hired["costs"]["special_equipment"] < 200      # not the old flat $250
+
+
+def test_admin_layout_has_no_known_collision_patterns():
+    """Guards the specific CSS mistakes that made the admin look unfinished.
+    Cheap to check, and each one shipped at least once."""
+    import pathlib
+    css = pathlib.Path("templates/admin/base.html").read_text(encoding="utf-8")
+
+    # `.stat span` also matched the caption under each number, rendering it
+    # uppercase and letter-spaced on top of the value.
+    assert ".stat .k{" in css
+    assert ".stat .hint{" in css and "text-transform:none" in css
+
+    # .bar-spacer is hidden on mobile for the nav; unscoped it also collapsed
+    # the partners-page header button against the title.
+    assert ".bar-inner .bar-spacer{display:none}" in css
+
+    # Several small forms share one table cell on the partners page.
+    assert "td form{display:inline-block" in css
+
+    # Touch targets and focus rings, on every button.
+    assert "min-height:44px" in css
+    assert "focus-visible" in css
+
+    # Status must never be conveyed by colour alone.
+    assert ".dot{" in css
+
+
+def test_admin_status_uses_text_not_only_colour():
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    _login(client)
+    page = client.get("/admin/partners").get_data(as_text=True)
+    # A dot is decoration; the word next to it is the actual signal.
+    assert "Active" in page or "Paused" in page or "Inactive" in page
+
+    dashboard = client.get("/admin/").get_data(as_text=True)
+    assert "Needs attention" in dashboard
+    # Either the all-clear or a specific, linked item — never a bare colour.
+    assert ("Nothing needs attention" in dashboard
+            or "not assigned to a partner" in dashboard
+            or "waiting for review" in dashboard)
