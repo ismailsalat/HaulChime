@@ -1,8 +1,9 @@
 {
   "domain": "http://localhost:8080",
   "apiUrl": "http://localhost:5002",
-  "email": "hello@haulchime.com",
+  "email": "asalat@haulchime.com",
   "region": "South King County, WA",
   "phoneDisplay": "",
-  "phoneHref": ""
+  "phoneHref": "",
+  "partnerUrl": "http://localhost:5002"
 }
