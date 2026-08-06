@@ -188,6 +188,30 @@ function next(window) {
           fs.existsSync(path.join(DIST, 'quote', 'index.html')));
   }
 
+  // ------------------------------------------------ partner CTAs
+  {
+    const partners = fs.readFileSync(path.join(DIST, 'partners', 'index.html'), 'utf8');
+    check('"Apply as a partner" opens the portal, not an email client',
+          /href="https?:\/\/[^"]+\/partner\/apply"/.test(partners),
+          'a mailto: here means applicants have to compose an email by hand');
+    check('the partners page offers a sign-in link too',
+          /\/partner\/login/.test(partners));
+    check('no partner CTA is a mailto link',
+          !/mailto:[^"]*partner/i.test(partners));
+
+    // Every page: the company address must be the real one.
+    const pages = ['index.html', 'partners/index.html', 'privacy/index.html',
+                   'terms/index.html', 'how-it-works/index.html'];
+    const wrong = pages.filter((page) => {
+      const file = path.join(DIST, page);
+      if (!fs.existsSync(file)) return false;
+      const html = fs.readFileSync(file, 'utf8');
+      return /hello@haulchime\.com|no-reply@example|owner@example/.test(html);
+    });
+    check('no page still shows an old or placeholder email address',
+          wrong.length === 0, 'stale email on: ' + wrong.join(', '));
+  }
+
   console.log(`\n${passes} passed, ${failures} failed\n`);
   process.exit(failures ? 1 : 0);
 })().catch((error) => {

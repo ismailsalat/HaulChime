@@ -24,8 +24,8 @@ weaker than the other.
 from datetime import date, datetime, timezone
 from functools import wraps
 
-from flask import (Blueprint, abort, flash, g, redirect, render_template,
-                   request, session, url_for)
+from flask import (Blueprint, abort, current_app, flash, g, redirect,
+                   render_template, request, session, url_for)
 
 import labels
 import logger
@@ -195,7 +195,7 @@ def safe_lead_view(assignment):
         "destination_access": labels.access_list(lead.destination_access_issues),
         "notes": lead.description or "",
         "photo_count": len(lead.photos),
-        "photos": [p.storage_key for p in lead.photos],
+        "photos": list(lead.photos),
         "lead_price": f"{float(assignment.lead_price or lead.lead_charge or 0):.2f}",
         "status": assignment.status,
         "customer_visible": assignment.customer_visible,
@@ -459,6 +459,33 @@ def update_status(reference):
     return redirect(url_for("partner.lead_detail", reference=reference))
 
 
+@bp.get("/leads/<reference>/photos/<path:key>")
+@partner_required
+def lead_photo(reference, key):
+    """Serve one photo from a lead assigned to this partner.
+
+    Ownership is re-checked here rather than trusting the URL, and the key is
+    matched against the photos actually attached to that lead - otherwise a
+    partner with one valid assignment could read every photo in the bucket by
+    swapping the key.
+    """
+    import os.path
+    from flask import redirect, send_from_directory
+    from storage import get_storage
+    assignment = assignment_or_404(reference)
+    safe_key = os.path.basename(key)
+    if safe_key not in set(assignment.lead.photos):
+        abort(404)
+    cfg = current_app.config
+    if cfg["STORAGE_BACKEND"] == "local":
+        return send_from_directory(cfg["UPLOAD_DIR"], safe_key)
+    try:
+        return redirect(get_storage(cfg).url_for(safe_key), code=302)
+    except Exception:
+        logger.error("partner.photo_failed", exc_info=True)
+        abort(404)
+
+
 # ------------------------------------------------------------- availability
 def _save_weekly(partner, form):
     rows = {r.day_of_week: r for r in (partner.availability or [])}
@@ -600,8 +627,10 @@ def apply_post():
     verified = False
     if checked.ok and attempt_id:
         try:
+            # Third argument is the phone in E.164 — the digest is compared
+            # against it, so the verified attempt has to belong to THIS number.
             attempt = sms_verification.attempt_for_quote(
-                "partner_apply", attempt_id, session.get(CSRF_KEY, ""))
+                "partner_apply", attempt_id, checked.e164)
             verified = bool(attempt and attempt.status == "verified")
         except Exception:
             verified = False

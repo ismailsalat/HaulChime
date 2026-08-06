@@ -1,3 +1,4 @@
+import re
 from werkzeug.security import generate_password_hash
 
 from app import create_app
@@ -1115,3 +1116,235 @@ def test_removing_an_assignment_is_recorded():
         assert LeadAssignment.query.count() == 0
         assert Lead.query.get(1).partner_id is None
         assert LeadActivity.query.filter_by(event_type="assignment.removed").count() == 1
+
+
+def test_partner_photo_access_is_scoped_to_their_own_lead():
+    """A partner with one valid assignment must not be able to read every
+    photo in storage by swapping the key in the URL."""
+    import io
+    from PIL import Image
+    app = make_app(); client = app.test_client()
+
+    def payload_with_photo():
+        data = dict(valid_payload())
+        buf = io.BytesIO()
+        Image.new("RGB", (60, 60), "red").save(buf, format="JPEG")
+        buf.seek(0)
+        data["photos"] = (buf, "garage.jpg")
+        return data
+
+    client.post("/api/leads", data=payload_with_photo(),
+                content_type="multipart/form-data")
+    client2 = app.test_client()
+    other = dict(payload_with_photo())
+    other["phone"] = "2065550142"
+    client2.post("/api/leads", data=other, content_type="multipart/form-data")
+
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        leads = Lead.query.order_by(Lead.id).all()
+        mine, theirs = leads[0], leads[1]
+        my_reference = mine.reference
+        my_key = mine.photos[0]
+        their_key = theirs.photos[0]
+        my_lead_id = mine.id
+    _assign(app, my_lead_id, partner_id)
+    _sign_in(client, account_id)
+
+    assert client.get(f"/partner/leads/{my_reference}/photos/{my_key}").status_code == 200
+    # Someone else's photo key on my own valid lead URL: must not work.
+    assert client.get(f"/partner/leads/{my_reference}/photos/{their_key}").status_code == 404
+    # Directory traversal must not work either.
+    assert client.get(
+        f"/partner/leads/{my_reference}/photos/..%2f..%2fmodels.py").status_code in (404, 400)
+
+
+def test_applicant_is_told_the_outcome():
+    """A company that applies and never hears anything is a partner lost."""
+    from models import PartnerApplication
+    app = make_app(); client = app.test_client()
+    with app.app_context():
+        db.session.add(PartnerApplication(
+            business_name="Cascade Movers", email="dana@example.com",
+            phone="+12069440031", phone_verified=True, status="pending_review",
+            zip_codes="98030", services_accepted="local_move",
+            availability_json="[]"))
+        db.session.commit()
+
+    sent = []
+    import mailer
+    original = mailer.send_email
+    mailer.send_email = lambda cfg, to, subject, body: sent.append((to, subject, body))
+    try:
+        csrf = _login(client)
+        client.post("/admin/partner-applications/1", data={
+            "csrf_token": csrf, "action": "reject",
+            "admin_message": "We already cover that area."})
+    finally:
+        mailer.send_email = original
+
+    assert sent, "the applicant was never told"
+    to, subject, body = sent[-1]
+    assert to == "dana@example.com"
+    assert "not approved" in subject.lower()
+    assert "already cover that area" in body     # the admin's message reaches them
+
+
+# --------------------------------------------------------------------------
+# End to end: a real company applies, gets approved, and signs in.
+# Walks the actual HTTP routes rather than poking the database, because that
+# is the only way to catch a wiring bug between them.
+# --------------------------------------------------------------------------
+
+def test_apply_approve_login_end_to_end():
+    from models import Partner, PartnerAccount, PartnerApplication
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    app.config["PHONE_VERIFICATION_ENABLED"] = True
+    applicant = app.test_client()
+
+    # --- 1. The company verifies its number through the public API ---------
+    start = applicant.post("/api/quotes/phone-verification/start", json={
+        "phone": "2065550131", "quote_draft_id": "partner_apply",
+        "session_id": "partner_apply", "company_website": ""})
+    assert start.status_code == 200, start.get_json()
+    attempt_id = start.get_json()["verification_attempt_id"]
+
+    done = applicant.post("/api/quotes/phone-verification/complete", json={
+        "quote_draft_id": "partner_apply", "verification_attempt_id": attempt_id,
+        "session_id": "partner_apply", "code": "123456"})
+    assert done.status_code == 200, done.get_json()
+
+    # --- 2. The application form is submitted ------------------------------
+    applicant.get("/partner/apply")
+    with applicant.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+    submitted = applicant.post("/partner/apply", data={
+        "csrf_token": csrf, "verification_attempt_id": attempt_id,
+        "business_name": "Cascade Movers", "contact_person": "Dana",
+        "email": "dana@example.com", "phone": "2065550131",
+        "zip_codes": "98030, 98031", "service_local_move": "on",
+        "service_junk_removal": "on", "crew_size": "3",
+        "truck_capacity": "16-foot box truck", "heavy_item_capable": "on",
+        "minimum_notice_hours": "24",
+        "available_0": "on", "start_0": "10:00", "end_0": "18:00",
+        "available_2": "on", "start_2": "10:00", "end_2": "18:00",
+    }, follow_redirects=True)
+    assert submitted.status_code == 200
+    assert "being reviewed" in submitted.get_data(as_text=True)
+
+    with app.app_context():
+        application = PartnerApplication.query.one()
+        assert application.status == "pending_review"
+        assert application.phone_verified is True
+        assert application.phone == "+12065550131"
+        assert application.zip_codes == "98030,98031"
+        assert "local_move" in application.services_accepted
+
+    # An unapproved applicant has no portal access.
+    assert applicant.get("/partner/", follow_redirects=False).status_code == 302
+
+    # --- 3. The admin approves --------------------------------------------
+    admin = app.test_client()
+    admin_csrf = _login(admin)
+    approved = admin.post("/admin/partner-applications/1", data={
+        "csrf_token": admin_csrf, "action": "approve", "credit_balance": "140",
+        "max_lead_price": "70", "price_per_lead": "40",
+        "daily_lead_limit": "10", "active": "on"})
+    assert approved.status_code == 302
+
+    with app.app_context():
+        partner = Partner.query.filter_by(name="Cascade Movers").one()
+        assert partner.active is True
+        assert PartnerAccount.query.filter_by(phone="+12065550131").one().active
+
+    # --- 4. The partner signs in with an SMS code -------------------------
+    portal = app.test_client()
+    portal.get("/partner/login")
+    with portal.session_transaction() as sess:
+        login_csrf = sess["partner_csrf_token"]
+    step1 = portal.post("/partner/login", data={
+        "csrf_token": login_csrf, "step": "phone", "phone": "2065550131"})
+    assert step1.status_code == 200
+    assert "code" in step1.get_data(as_text=True).lower()
+
+    step2 = portal.post("/partner/login", data={
+        "csrf_token": login_csrf, "step": "code", "code": "123456"},
+        follow_redirects=True)
+    assert step2.status_code == 200
+    page = step2.get_data(as_text=True)
+    assert "Cascade Movers" in page, "sign-in did not land on the dashboard"
+    assert "Taking leads" in page
+
+    # And the portal is genuinely usable, not just reachable.
+    for path in ["/partner/leads", "/partner/availability", "/partner/profile"]:
+        assert portal.get(path).status_code == 200, path
+
+    with app.app_context():
+        assert PartnerAccount.query.one().last_login_at is not None
+
+
+def test_login_is_refused_before_approval():
+    """The same flow, stopped at the gate."""
+    from models import PartnerApplication, PartnerAccount, Partner
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    partner_id, account_id = _approved_partner(app, "Pending Co", "+12065550132")
+    with app.app_context():
+        PartnerApplication.query.filter_by(partner_id=partner_id).one().status = \
+            "pending_review"
+        db.session.commit()
+
+    portal = app.test_client()
+    portal.get("/partner/login")
+    with portal.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+    portal.post("/partner/login", data={
+        "csrf_token": csrf, "step": "phone", "phone": "2065550132"})
+    response = portal.post("/partner/login", data={
+        "csrf_token": csrf, "step": "code", "code": "123456"},
+        follow_redirects=True)
+    body = response.get_data(as_text=True)
+    assert "under review" in body
+    with portal.session_transaction() as sess:
+        assert "partner_account_id" not in sess
+
+
+def test_every_admin_page_renders():
+    """A stylesheet rewrite is exactly the sort of change that silently breaks
+    one template, so walk all of them."""
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id = _partner_with_schedule(app)
+    _lead_on(app, 2)
+    with app.app_context():
+        from models import PartnerApplication
+        application_id = PartnerApplication.query.first().id
+    csrf = _login(client)
+    client.post("/admin/leads/1/assign",
+                data={"csrf_token": csrf, "partner_id": partner_id, "lead_price": "35"})
+
+    pages = ["/admin/", "/admin/leads", "/admin/leads/1", "/admin/partners",
+             "/admin/partner-applications", f"/admin/partner-applications/{application_id}",
+             "/admin/leads/1/assign", "/admin/logs", "/admin/settings"]
+    for path in pages:
+        response = client.get(path)
+        assert response.status_code == 200, f"{path} returned {response.status_code}"
+        body = response.get_data(as_text=True)
+        # A Jinja mistake often renders as a literal brace rather than a 500.
+        # `${{...}}` is excluded: the settings page documents Railway's own
+        # variable-reference syntax, which legitimately contains braces.
+        leftovers = re.findall(r'(?<!\$)\{\{\s*\w', body)
+        assert not leftovers, f"unrendered template expression on {path}"
+        assert "nav-item active" in body or "nav-item" in body, path
+
+
+def test_admin_buttons_use_the_shared_styles():
+    """Bare <button> elements are what made the admin look unfinished."""
+    import pathlib
+    bad = []
+    for template in pathlib.Path("templates/admin").glob("*.html"):
+        text = template.read_text()
+        for match in re.finditer(r'<button(?![^>]*class=)[^>]*>', text):
+            bad.append(f"{template.name}: {match.group(0)[:60]}")
+    assert not bad, "unstyled buttons:\n" + "\n".join(bad)

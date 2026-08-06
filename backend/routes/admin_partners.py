@@ -66,6 +66,7 @@ def register(bp, login_required, check_csrf):
 
         if action == "approve":
             partner = _approve(application, request.form, now)
+            _tell_applicant(application, "approved")
             flash(f"{application.business_name} approved. They can sign in now.", "ok")
             return redirect(url_for("admin.partners", edit_id=partner.id))
 
@@ -93,6 +94,7 @@ def register(bp, login_required, check_csrf):
                 partner_id=application.partner_id, event_type=f"application.{action}",
                 old_value=previous, new_value=application.status))
             db.session.commit()
+            _tell_applicant(application, application.status)
             logger.info("admin.application_action", action=action,
                         application_id=application.id, actor=g.admin_user)
             flash(f"Application marked {application.status.replace('_', ' ')}.", "ok")
@@ -285,6 +287,70 @@ def register(bp, login_required, check_csrf):
         db.session.commit()
         flash(f"Removed {partner_name} from this lead.", "ok")
         return redirect(url_for("admin.lead_detail", lead_id=lead.id))
+
+    def _tell_applicant(application, outcome):
+        """Close the loop with the applicant.
+
+        Without this a company applies and simply never hears anything, which
+        is the fastest way to lose partners you just approved. Best effort by
+        both channels: the decision is already committed, so a mail or SMS
+        outage must not roll it back.
+        """
+        cfg = current_app.config
+        site = cfg["SITE_URL"].rstrip("/")
+        copy = {
+            "approved": ("You're approved",
+                         f"Good news - {application.business_name} is approved as a "
+                         f"HaulChime partner. Sign in with your mobile number to see "
+                         f"leads: {site}/partner/login"),
+            "changes_requested": ("We need a few changes",
+                                  f"Thanks for applying to HaulChime. Before we can "
+                                  f"approve {application.business_name} we need a few "
+                                  f"changes.\n\n"
+                                  f"{application.admin_message or ''}\n\n"
+                                  f"Update and resubmit: {site}/partner/apply"),
+            "rejected": ("Application not approved",
+                         f"Thank you for your interest in HaulChime. We aren't able to "
+                         f"add {application.business_name} as a partner at this time."
+                         + (f"\n\n{application.admin_message}"
+                            if application.admin_message else "")),
+            "suspended": ("Partner account paused",
+                          f"Your HaulChime partner account has been paused. "
+                          f"Contact us to discuss it."
+                          + (f"\n\n{application.admin_message}"
+                             if application.admin_message else "")),
+            "approved_again": ("Partner account reactivated",
+                               f"Your HaulChime partner account is active again. "
+                               f"Sign in: {site}/partner/login"),
+        }
+        subject, body = copy.get(outcome, (None, None))
+        if not subject:
+            return
+
+        if application.email:
+            try:
+                from mailer import send_email
+                send_email(cfg, application.email, f"HaulChime - {subject}", body)
+            except Exception:
+                logger.warn("admin.applicant_email_failed",
+                            application_id=application.id)
+
+        # A short SMS, because partners read texts and not always email.
+        if cfg.get("BIRD_API_KEY") and application.phone:
+            try:
+                import bird_client
+                import phone as phone_util
+                checked = phone_util.validate_us_mobile(application.phone)
+                if checked and checked.ok:
+                    bird_client.send_notification(
+                        cfg, checked.e164,
+                        f"HaulChime: {subject}. "
+                        + ("Sign in at " + site + "/partner/login"
+                           if outcome in ("approved", "approved_again")
+                           else "Check your email for details."))
+            except Exception:
+                logger.warn("admin.applicant_sms_failed",
+                            application_id=application.id)
 
     def _notify_partner_by_sms(partner, lead):
         """Short, no customer detail, best effort. A failed text must not
