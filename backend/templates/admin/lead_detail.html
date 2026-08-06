@@ -56,6 +56,25 @@
 </div>
 {% endif %}
 {% if lead.score_breakdown %}{% set b=lead.score_breakdown|fromjson %}<div class="card"><h2>Algorithm breakdown</h2><div class="grid"><div class="stat"><span class="k">Job scope</span><b>{{ b.get('scope',0) }}</b></div><div class="stat"><span class="k">Difficulty</span><b>{{ b.get('difficulty',0) }}</b></div><div class="stat"><span class="k">Information</span><b>{{ b.get('information',0) }}</b></div><div class="stat"><span class="k">Intent</span><b>{{ b.get('intent',0) }}</b></div><div class="stat"><span class="k">Penalties</span><b>{{ b.get('penalties',0) }}</b></div></div><p class="hint">Difficulty is scored separately so a difficult small job does not automatically become Premium.</p></div>{% endif %}
+<div class="card" style="border:2px solid #ff5a1f">
+  <h2>Assign a partner</h2>
+  <p class="hint">Ranks every partner by whether they can actually take this job &mdash; ZIP, service, availability, capability, credit and daily limit.</p>
+  <a class="btn" href="{{ url_for('admin.assign_panel', lead_id=lead.id) }}">Choose a partner</a>
+  {% if lead.assignments %}<h3 style="margin:20px 0 8px;font-size:.95rem">Currently assigned</h3>
+  {% for a in lead.assignments %}
+  <div style="display:flex;justify-content:space-between;gap:12px;flex-wrap:wrap;align-items:center;padding:10px 0;border-top:1px solid #e6e1d8">
+    <div><strong>{{ a.partner.name }}</strong> <span class="badge">{{ a.status|replace('_',' ')|capitalize }}</span>
+      {% if a.assigned_with_override %}<span class="badge red" title="{{ a.override_reasons }}">Override</span>{% endif %}
+      {% if a.decline_reason %}<br><span class="muted small">Declined: {{ a.decline_reason|replace('_',' ') }}{% if a.decline_note %} &mdash; {{ a.decline_note }}{% endif %}</span>{% endif %}</div>
+    <form method="post" action="{{ url_for('admin.unassign_partner', lead_id=lead.id) }}"
+          data-confirm="Remove {{ a.partner.name }} from this lead?{% if a.customer_visible %} They have already accepted it and seen the customer details.{% endif %}">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="assignment_id" value="{{ a.id }}">
+      <button type="submit" class="linkbtn danger">Remove</button>
+    </form>
+  </div>{% endfor %}{% endif %}
+</div>
+
 <div class="card"><h2>Send this lead to the partner</h2>
 {% if lead.partner %}
   <p class="muted small">Goes to <strong>{{ lead.partner.name }}</strong> &mdash; email {{ lead.partner.notification_email or lead.partner.email or 'not set' }}, text {{ lead.partner.phone or 'not set' }}. The text is short and carries no street address; the full detail is in the email.</p>
@@ -70,7 +89,13 @@
 {% endif %}
 </div>
 <div class="card"><h2>Admin decision</h2><form method="post" data-warn-unsaved="1" data-confirm="Save these changes to lead {{ lead.reference }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><div class="fieldrow"><div><label>Status</label><select name="status">{% for s in statuses %}<option value="{{ s }}" {{ 'selected' if lead.status==s }}>{{ L.status_label(s) }}</option>{% endfor %}</select></div><div><label>Qualification</label><select name="qualification">{% for q in qualifications %}<option value="{{ q }}" {{ 'selected' if lead.qualification==q }}>{{ L.QUALIFICATION_META[q][0] }}</option>{% endfor %}</select></div><div><label>Assigned partner</label><select name="partner_id"><option value="">Unassigned</option>{% for p in partners %}<option value="{{ p.id }}" {{ 'selected' if lead.partner_id==p.id }}>{{ p.name }} · ${{ '%.2f'|format(p.credit_balance or 0) }} credit</option>{% endfor %}</select></div><div><label>Price charged ($)</label><input name="lead_charge" inputmode="decimal" value="{{ lead.lead_charge or lead.lead_price or '' }}"></div></div><label>Admin notes</label><textarea name="admin_notes" rows="3">{{ lead.admin_notes or '' }}</textarea><button type="submit">Save lead</button></form></div>
-<div class="card" style="border-color:#f2b8b5"><h2>Danger zone</h2><p class="muted small">Deleting removes the lead, its photos and its activity history for good. If you only want it out of the way, set the status to Invalid instead.</p><form method="post" action="{{ url_for('admin.delete_lead', lead_id=lead.id) }}" data-confirm="Permanently delete lead {{ lead.reference }}, its photos and its whole history? This cannot be undone."><input type="hidden" name="csrf_token" value="{{ csrf_token }}"><button type="submit" class="linkbtn danger">Delete this lead permanently</button></form></div>
+<div class="card" style="border-color:#f2b8b5"><h2>Danger zone</h2><p class="muted small">Deleting removes the lead, its photos and its activity history for good. If you only want it out of the way, set the status to Invalid instead.</p><form method="post" action="{{ url_for('admin.delete_lead', lead_id=lead.id) }}" data-confirm="Last check: permanently delete {{ lead.reference }}, its photos and its whole history?">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label for="confirm_text">Type <strong>DELETE</strong> to enable this button</label>
+    <input id="confirm_text" name="confirm_text" autocomplete="off" placeholder="DELETE" style="max-width:220px"
+           oninput="document.getElementById('del-btn').disabled = this.value.trim().toUpperCase() !== 'DELETE'">
+    <button type="submit" id="del-btn" class="linkbtn danger" disabled style="margin-top:12px">Delete this lead permanently</button>
+  </form></div>
 <div class="card"><h2>Consent and attribution</h2><p class="muted small">{{ lead.consent_text }}</p><p class="muted small">Agreed at {{ lead.consent_timestamp }}</p><div class="fieldrow"><p class="kv"><span class="k">Source</span><br><span class="v">{{ lead.utm_source or 'Direct' }}</span></p><p class="kv"><span class="k">Landing page</span><br><span class="v">{{ lead.landing_page or '—' }}</span></p></div></div>
 <div class="card"><h2>Activity history</h2>{% if timeline %}<ul class="timeline">{% for a in timeline %}<li class="{{ a.event_status if a.event_status != 'ok' }}"><time>{{ a.created_at.strftime('%b %d, %I:%M %p') }}</time>{{ L.event_label(a.event_type) }}{% if a.new_value %}: {{ a.new_value }}{% endif %}</li>{% endfor %}</ul>{% else %}<p class="empty">No activity recorded.</p>{% endif %}</div>
 {% endblock %}

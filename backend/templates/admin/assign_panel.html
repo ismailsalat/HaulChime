@@ -1,0 +1,83 @@
+{% extends "admin/base.html" %}{% block title %}Assign {{ lead.reference }}{% endblock %}
+{% block content %}
+<p class="small"><a href="{{ url_for('admin.lead_detail', lead_id=lead.id) }}">&larr; Back to lead</a></p>
+<h1>Assign {{ lead.reference }}</h1>
+<p class="muted">{{ L.service_label(lead.service_type or lead.pest_type) }} &middot;
+  {{ lead.city or '' }} {{ lead.zip_code }} &middot; {{ L.job_size_label(lead.job_size) }} &middot;
+  {{ L.timing_label(lead.urgency) }}{% if lead.service_date %} ({{ lead.service_date }}){% endif %}</p>
+
+{% if blocked %}
+<div class="card" style="border:2px solid #b42318;background:#fff8f7">
+  <h2 style="color:#b42318">Hold on &mdash; {{ blocked.partner_name }} isn't a clean match</h2>
+  <p>Assigning anyway is allowed, but read these first:</p>
+  <ul style="margin:10px 0 0;padding-left:20px;line-height:1.75">
+    {% for reason in blocked.failures %}<li><strong>Problem:</strong> {{ reason }}</li>{% endfor %}
+    {% for reason in blocked.unknowns %}<li><strong>Unverified:</strong> {{ reason }}</li>{% endfor %}
+  </ul>
+  <form method="post" action="{{ url_for('admin.assign_partner', lead_id=lead.id) }}" style="margin-top:18px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="partner_id" value="{{ blocked.partner_id }}">
+    <input type="hidden" name="lead_price" value="{{ price }}">
+    <input type="hidden" name="confirm_override" value="yes">
+    <label class="checkline" style="font-weight:800">
+      <input type="checkbox" required>
+      I understand the warnings above and want to assign this lead anyway.
+    </label>
+    <button type="submit" class="btn"
+            data-confirm="Assign {{ lead.reference }} to {{ blocked.partner_name }} despite {{ (blocked.failures + blocked.unknowns)|length }} warning(s)? This is recorded in the activity log.">
+      Assign anyway</button>
+    <a class="btn btn-secondary" href="{{ url_for('admin.assign_panel', lead_id=lead.id) }}">Choose someone else</a>
+  </form>
+</div>
+{% endif %}
+
+{% for r in results %}
+{% set tone = 'ok' if r.status=='eligible' else ('warn' if r.status=='needs_review' else 'off') %}
+<div class="card" style="border-left:5px solid {{ '#18794e' if tone=='ok' else ('#b54708' if tone=='warn' else '#b42318') }}">
+  <div class="row" style="display:flex;justify-content:space-between;gap:14px;flex-wrap:wrap;align-items:baseline">
+    <h2 style="margin:0">{{ r.partner_name }}</h2>
+    <span class="badge {{ 'green' if tone=='ok' else ('amber' if tone=='warn' else 'red') }}">
+      {% if tone=='ok' %}&#10003; Eligible{% elif tone=='warn' %}&#9888; Needs review{% else %}&#9888; Not eligible{% endif %}
+    </span>
+  </div>
+
+  {% if r.failures %}
+  <p style="margin:10px 0 4px;color:#b42318;font-weight:800">Reasons it's not eligible:</p>
+  <ul style="margin:0;padding-left:20px;line-height:1.7">{% for f in r.failures %}<li>{{ f }}</li>{% endfor %}</ul>
+  {% endif %}
+  {% if r.unknowns %}
+  <p style="margin:10px 0 4px;color:#b54708;font-weight:800">Couldn't be checked:</p>
+  <ul style="margin:0;padding-left:20px;line-height:1.7">{% for u in r.unknowns %}<li>{{ u }}</li>{% endfor %}</ul>
+  {% endif %}
+
+  <table class="checks" style="width:100%;margin-top:14px;border-collapse:collapse;font-size:.86rem">
+    {% for c in r.checks %}
+    <tr>
+      <td style="width:26px;padding:5px 0">
+        {% if c.state=='ok' %}<span style="color:#18794e;font-weight:900">&#10003;</span>
+        {% elif c.state=='unknown' %}<span style="color:#b54708;font-weight:900">?</span>
+        {% else %}<span style="color:#b42318;font-weight:900">&#10007;</span>{% endif %}
+      </td>
+      <td style="padding:5px 10px 5px 0;font-weight:750;white-space:nowrap">{{ c.label }}</td>
+      <td style="padding:5px 0;color:#5b666f">{{ c.detail }}</td>
+    </tr>
+    {% endfor %}
+  </table>
+
+  <form method="post" action="{{ url_for('admin.assign_partner', lead_id=lead.id) }}" style="margin-top:16px">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="partner_id" value="{{ r.partner_id }}">
+    <div class="fieldrow" style="align-items:end">
+      <div><label>Lead price ($)</label><input name="lead_price" inputmode="decimal" value="{{ price }}"></div>
+      <div><button type="submit" class="btn"
+        {% if r.status == 'eligible' %}
+          data-confirm="Assign this lead to {{ r.partner_name }}? They'll be notified straight away."
+        {% endif %}>Assign to {{ r.partner_name }}</button></div>
+    </div>
+    {% if r.status != 'eligible' %}
+    <p class="hint" style="margin-top:8px">You'll be asked to confirm the warnings before this goes through.</p>
+    {% endif %}
+  </form>
+</div>
+{% endfor %}
+{% endblock %}
