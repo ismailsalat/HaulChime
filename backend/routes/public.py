@@ -461,7 +461,10 @@ def create_lead():
         destination_access_issues=destination_access_issues,
         destination_stairs_flights=destination_stairs_flights,
         property_type=property_type, urgency=urgency,
-        distance_miles=miles, photo_count=len(photo_keys))
+        distance_miles=miles, photo_count=len(photo_keys),
+        special_items_note=special_items_note, distance_basis=miles_basis,
+        destination_known=destination_known,
+        address_verified=address_ok)
     economics["distance_basis"] = miles_basis
 
     eligible = []
@@ -569,9 +572,11 @@ def create_lead():
         preferred_time=_short(preferred_time, 20),
         location_seen=pickup_access, urgency=urgency,
         description=description[:5000], comments=_short(form.get("comments"), 2000),
-        estimated_job_value=economics["estimated_job_value"],
+        # May be absent: when required information is missing the model
+        # deliberately returns no figure rather than a guessed one.
+        estimated_job_value=economics.get("estimated_job_value"),
         cost_breakdown=json.dumps(economics),
-        cost_confidence=economics["confidence"],
+        cost_confidence=economics.get("confidence"),
         difficulty_score=result["difficulty_score"], information_score=result["information_score"],
         lead_tier=result["tier"], lead_price=result["price"], lead_charge=result["price"],
         job_details=json.dumps(details, default=str), photo_keys=",".join(photo_keys),
@@ -602,10 +607,14 @@ def create_lead():
           tier=result["tier"], lead_price=result["price"], lead_status=status,
           verified=bool(attempt), photos=len(photo_keys))
     audit("lead.cost_modelled", lead, actor_type="system",
-          new_value=f"${economics['estimated_job_value']} ({economics['confidence']})",
-          total_cost=economics["total_cost"], margin=economics["target_margin_pct"],
-          weight_lbs=economics["estimated_weight_lbs"],
-          miles=economics["total_miles"], disposal=economics["costs"]["disposal"])
+          new_value=(f"${economics['estimated_job_value']}"
+                     if economics.get("estimated_job_value") is not None
+                     else "not enough information"),
+          confidence=economics.get("confidence"),
+          missing="; ".join(economics.get("missing", []))[:200] or None,
+          total_cost=economics.get("total_cost"),
+          weight_lbs=economics.get("estimated_weight_lbs"),
+          miles=economics.get("total_miles"))
     audit("lead.scored", lead, actor_type="system",
           new_value=f"{result['tier']} ${result['price']}", **result["components"])
     if attempt:

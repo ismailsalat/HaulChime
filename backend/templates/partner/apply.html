@@ -92,7 +92,9 @@
 
 <script>
 (function(){
-  var api = {{ api_url|tojson }};
+  // Same-origin on purpose: this page is served by the Flask app, so a
+  // relative path hits the same host and no CORS preflight happens at all.
+  var api = '';
   var draft = 'partner_apply';
   var attemptField = document.getElementById('attempt-id');
   var status = document.getElementById('verify-status');

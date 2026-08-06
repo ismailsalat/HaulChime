@@ -71,7 +71,7 @@ function footer() {
 // Minimal brand bar for ad landing pages: the logo, and nothing to click away
 // with. No nav, no blog, no partner or admin links.
 function bareHeader() {
-  return `<header class="bare-header"><div class="shell"><a class="logo" href="/quote/" aria-label="HaulChime">HaulChime</a>
+  return `<header class="bare-header"><div class="shell">${logo()}
   <span class="bare-trust">Free &middot; No payment required</span></div></header>`;
 }
 function bareFooter() {
@@ -104,7 +104,7 @@ const home = layout({
     <div class="eyebrow"><span></span> Moving, junk removal and hauling</div>
     <h1>Clear the space.<br><em>Move what matters.</em></h1>
     <p class="hero-lede">Describe the job once, add addresses and photos, and get your request in front of local professionals equipped for the work.</p>
-    <div class="hero-actions"><a class="button button-lg" href="/quote/">Build my request</a><a class="text-link" href="/how-it-works/">See how it works <span>→</span></a></div>
+    <div class="hero-actions"><a class="button button-lg" href="/quote/">Get my free quote</a><a class="text-link" href="/how-it-works/">See how it works <span>→</span></a></div>
     <div class="trust-row"><div><strong>Phone verified</strong><span>Less fake contact info</span></div><div><strong>Photos supported</strong><span>Clearer job details</span></div><div><strong>ZIP matched</strong><span>Only relevant providers</span></div></div>
   </div><div class="hero-visual" aria-label="HaulChime job request preview">
     <div class="visual-orbit orbit-a"></div><div class="visual-orbit orbit-b"></div>

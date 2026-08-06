@@ -30,29 +30,72 @@
 </div>
 <div class="card"><h2>Job details</h2><div class="fieldrow"><p class="kv"><span class="k">Service</span><br><span class="v">{{ L.service_label(lead.service_type or lead.pest_type) }}</span></p><p class="kv"><span class="k">Job type</span><br><span class="v">{{ L.job_type_label(lead.job_type) if lead.job_type else 'Not specified' }}</span></p><p class="kv"><span class="k">Job size</span><br><span class="v">{{ L.job_size_label(lead.job_size) }}</span></p><p class="kv"><span class="k">Timing</span><br><span class="v">{{ L.timing_label(lead.urgency) }}</span></p><p class="kv"><span class="k">Preferred date</span><br><span class="v">{{ lead.service_date or 'Not specified' }}{% if lead.preferred_time %} · {{ L.preferred_time_label(lead.preferred_time) }}{% endif %}</span></p><p class="kv"><span class="k">Property</span><br><span class="v">{{ L.property_label(lead.property_type) }}</span></p></div>{% if lead.item_categories %}<p class="kv"><span class="k">Item categories</span><br><span class="v">{{ L.item_list(lead.item_categories) }}</span></p>{% endif %}{% if lead.extra_services %}<p class="kv"><span class="k">Additional help requested</span><br><span class="v">{{ L.extra_service_list(lead.extra_services) }}</span></p>{% endif %}<p class="kv"><span class="k">Inventory</span><br><span class="v">{{ lead.inventory or '—' }}</span></p>{% if lead.special_items %}<p class="kv"><span class="k">Heavy or special items</span><br><span class="v">{{ lead.special_items }}{% if lead.special_items_note and lead.special_items_note not in lead.special_items %}<br><em>{{ lead.special_items_note }}</em>{% endif %}</span></p>{% endif %}<p class="kv"><span class="k">Additional description</span><br><span class="v">{{ lead.description }}</span></p>{% if lead.photos %}<div>{% for k in lead.photos %}<a href="/api/photos/{{ k }}" target="_blank" rel="noopener"><img class="thumb" src="/api/photos/{{ k }}" alt="Customer job photo"></a>{% endfor %}</div>{% endif %}</div>
 <div class="card"><h2>Addresses and access</h2><div class="fieldrow"><p class="kv"><span class="k">Pickup {% if lead.address_verified %}<span class="badge green">Address verified</span>{% else %}<span class="badge gray">Not verified</span>{% endif %}</span><br><span class="v">{{ lead.pickup_address }}{% if lead.pickup_unit %} {{ lead.pickup_unit }}{% endif %}<br>{{ lead.city or '' }}{% if lead.pickup_state %}, {{ lead.pickup_state }}{% endif %} {{ lead.zip_code }}</span></p><p class="kv"><span class="k">Destination</span><br><span class="v">{% if lead.destination_address %}{{ lead.destination_address }}{% if lead.destination_unit %} {{ lead.destination_unit }}{% endif %}<br>{{ lead.destination_city or '' }} {{ lead.destination_zip or '' }}{% elif lead.destination_zip %}Exact address not known yet<br>{{ lead.destination_city or '' }} {{ lead.destination_zip }}{% else %}Not required{% endif %}</span></p></div><div class="fieldrow"><p class="kv"><span class="k">Access at pickup</span><br><span class="v">{{ L.access_list(lead.access_issues) or (lead.pickup_access or '—')|replace('_',' ')|capitalize }}{% if lead.stairs_flights %} · {{ L.flight_label(lead.stairs_flights) }}{% endif %}</span></p><p class="kv"><span class="k">Access at destination</span><br><span class="v">{{ L.access_list(lead.destination_access_issues) or (lead.destination_access or '—')|replace('_',' ')|capitalize }}{% if lead.destination_stairs_flights %} · {{ L.flight_label(lead.destination_stairs_flights) }}{% endif %}</span></p></div></div>
-{% if lead.cost_breakdown %}{% set c=lead.cost_breakdown|fromjson %}
-<div class="card" style="border:2px solid #b42318">
-  <h2>Internal job economics <span class="badge red">Admin only</span></h2>
-  <p class="hint"><strong>Never shown or quoted to the customer.</strong> HaulChime does not price jobs &mdash; the partner inspects the work and agrees the price directly with the customer. This is a planning figure so you can decide what this lead is worth.</p>
-  <div class="grid">
-    <div class="stat"><span class="k">Estimated job value</span><b>${{ '%.0f'|format(c.get('estimated_job_value',0)) }}</b></div>
-    <div class="stat"><span class="k">Likely range</span><b>${{ '%.0f'|format(c.get('estimated_range_low',0)) }}&ndash;${{ '%.0f'|format(c.get('estimated_range_high',0)) }}</b></div>
-    <div class="stat"><span class="k">Est. cost to run</span><b>${{ '%.0f'|format(c.get('total_cost',0)) }}</b></div>
-    <div class="stat"><span class="k">Est. gross profit</span><b>${{ '%.0f'|format(c.get('estimated_profit',0)) }}</b></div>
-    <div class="stat"><span class="k">Confidence</span><b>{{ (c.get('confidence','low'))|capitalize }}</b></div>
+{% if lead.cost_breakdown %}{% set c = lead.cost_breakdown|fromjson %}
+<div class="card estimate">
+  <div class="row" style="margin-bottom:6px">
+    <h2 style="margin:0">Internal job economics <span class="badge red">Admin only</span></h2>
+    {% if c.get('status') == 'insufficient_information' %}
+      <span class="badge amber">&#9888; Not enough information</span>
+    {% elif c.get('confidence') == 'high' %}<span class="badge green">&#10003; High confidence</span>
+    {% elif c.get('confidence') == 'medium' %}<span class="badge blue">Medium confidence</span>
+    {% else %}<span class="badge amber">Low confidence</span>{% endif %}
   </div>
-  <h3 style="margin-top:22px;font-size:1rem">Where the cost comes from</h3>
-  <div class="fieldrow">
-    <p class="kv"><span class="k">Labor</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('labor',0)) }} &middot; {{ c.get('crew_size',0) }} crew &times; {{ c.get('paid_crew_hours',0) }} paid crew-hours</span></p>
-    <p class="kv"><span class="k">Fuel</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('fuel',0)) }} &middot; {{ c.get('total_miles',0) }} mi</span></p>
-    <p class="kv"><span class="k">Vehicle wear</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('vehicle',0)) }}</span></p>
-    <p class="kv"><span class="k">Disposal / tipping</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('disposal',0)) }}{% if c.get('involves_disposal') %} &middot; ~{{ c.get('estimated_weight_lbs',0) }} lb{% else %} &middot; no dump run{% endif %}</span></p>
-    <p class="kv"><span class="k">Special equipment</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('special_equipment',0)) }}</span></p>
-    <p class="kv"><span class="k">Materials</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('materials',0)) }}</span></p>
-    <p class="kv"><span class="k">Overhead</span><br><span class="v">${{ '%.2f'|format(c.get('costs',{}).get('overhead',0)) }}</span></p>
-    <p class="kv"><span class="k">Target margin</span><br><span class="v">{{ c.get('target_margin_pct',0) }}%</span></p>
-  </div>
-  <p class="hint">Distance basis: {{ (c.get('distance_basis','') or 'default')|replace('_',' ') }} &middot; {{ c.get('distance_miles',0) }} mi loaded. {% if c.get('unknown_answers',0) %}{{ c.get('unknown_answers') }} question(s) answered "not sure", so the range is widened.{% endif %}</p>
+  <p class="hint"><strong>Internal planning figure only.</strong> HaulChime does not quote the job &mdash;
+    the assigned partner inspects the work and agrees pricing directly with the customer.</p>
+
+  {% if c.get('status') == 'insufficient_information' %}
+    <div class="estimate-blocked">
+      <h3 style="margin:0 0 8px">Estimate unavailable</h3>
+      <p class="small" style="margin:0 0 10px">We won't guess. A confident number built on
+        missing facts is worse than none &mdash; you'd price the lead against it.</p>
+      <p class="k" style="margin-bottom:6px">Missing information</p>
+      <ul class="miss">{% for m in c.get('missing', []) %}<li>{{ m }}</li>{% endfor %}</ul>
+      {% if c.get('advisory') %}
+      <p class="k" style="margin:14px 0 6px">Would also help</p>
+      <ul class="miss soft">{% for m in c.get('advisory') %}<li>{{ m }}</li>{% endfor %}</ul>
+      {% endif %}
+    </div>
+    <div class="grid" style="margin-top:16px">
+      <div class="stat"><span>Recommended crew</span><b>{{ c.get('recommended_crew','—') }}</b></div>
+      <div class="stat"><span>Estimated cost</span><b>&mdash;</b></div>
+      <div class="stat"><span>Likely invoice</span><b>&mdash;</b></div>
+      <div class="stat"><span>Gross profit</span><b>&mdash;</b></div>
+    </div>
+    {% if c.get('crew_reasons') %}
+    <p class="hint" style="margin-top:12px">Crew reasoning: {{ c.get('crew_reasons')|join(' · ') }}</p>
+    {% endif %}
+  {% else %}
+    <div class="grid">
+      <div class="stat"><span>Estimated job value</span><b>${{ c.get('display',{}).get('value','0.00') }}</b></div>
+      <div class="stat"><span>Likely range</span><b>${{ c.get('display',{}).get('low','0') }}&ndash;${{ c.get('display',{}).get('high','0') }}</b></div>
+      <div class="stat"><span>Est. cost to run</span><b>${{ c.get('display',{}).get('cost','0') }}</b></div>
+      <div class="stat"><span>Est. gross profit</span><b class="pos">${{ c.get('display',{}).get('profit','0') }}</b></div>
+      <div class="stat"><span>Crew</span><b>{{ c.get('crew_size','—') }}</b></div>
+    </div>
+
+    <h3 style="margin:22px 0 10px">Where the cost comes from</h3>
+    <div class="costgrid">
+      <div><span class="k">Labor</span><b>${{ '%.2f'|format(c.get('costs',{}).get('labor',0)) }}</b>
+        <small>{{ c.get('crew_size',0) }} crew &times; {{ c.get('paid_crew_hours',0) }} paid crew-hours</small></div>
+      <div><span class="k">Fuel</span><b>${{ '%.2f'|format(c.get('costs',{}).get('fuel',0)) }}</b>
+        <small>{{ c.get('total_miles',0) }} mi</small></div>
+      <div><span class="k">Vehicle wear</span><b>${{ '%.2f'|format(c.get('costs',{}).get('vehicle',0)) }}</b><small>&nbsp;</small></div>
+      <div><span class="k">Disposal / tipping</span><b>${{ '%.2f'|format(c.get('costs',{}).get('disposal',0)) }}</b>
+        <small>{{ '~' ~ c.get('estimated_weight_lbs',0) ~ ' lb' if c.get('involves_disposal') else 'no dump run' }}</small></div>
+      <div><span class="k">Equipment</span><b>${{ '%.2f'|format(c.get('costs',{}).get('special_equipment',0)) }}</b>
+        <small>consumables{{ ' + hire' if c.get('costs',{}).get('special_equipment',0) > 60 else '' }}</small></div>
+      <div><span class="k">Materials</span><b>${{ '%.2f'|format(c.get('costs',{}).get('materials',0)) }}</b><small>&nbsp;</small></div>
+      <div><span class="k">Overhead</span><b>${{ '%.2f'|format(c.get('costs',{}).get('overhead',0)) }}</b><small>&nbsp;</small></div>
+      <div><span class="k">Target margin</span><b>{{ c.get('target_margin_pct',0) }}%</b><small>&nbsp;</small></div>
+    </div>
+
+    <p class="hint" style="margin-top:16px">
+      Handling {{ c.get('handling_hours','—') }} h &middot; travel {{ c.get('drive_hours','—') }} h &middot;
+      distance basis {{ (c.get('distance_basis','') or 'default')|replace('_',' ') }}
+      ({{ c.get('distance_miles',0) }} mi loaded).
+      {% if c.get('advisory') %}<br>Range widened &mdash; still missing: {{ c.get('advisory')|join('; ') }}.{% endif %}
+    </p>
+  {% endif %}
 </div>
 {% endif %}
 {% if lead.score_breakdown %}{% set b=lead.score_breakdown|fromjson %}<div class="card"><h2>Algorithm breakdown</h2><div class="grid"><div class="stat"><span class="k">Job scope</span><b>{{ b.get('scope',0) }}</b></div><div class="stat"><span class="k">Difficulty</span><b>{{ b.get('difficulty',0) }}</b></div><div class="stat"><span class="k">Information</span><b>{{ b.get('information',0) }}</b></div><div class="stat"><span class="k">Intent</span><b>{{ b.get('intent',0) }}</b></div><div class="stat"><span class="k">Penalties</span><b>{{ b.get('penalties',0) }}</b></div></div><p class="hint">Difficulty is scored separately so a difficult small job does not automatically become Premium.</p></div>{% endif %}

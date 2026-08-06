@@ -174,10 +174,16 @@ function next(window) {
     const links = [...html.matchAll(/href="([^"]+)"/g)].map((m) => m[1])
       .filter((href) => href.startsWith('/') && !href.startsWith('/css')
                         && !href.startsWith('/js') && href !== '/favicon.svg');
-    const allowed = ['/quote/', '/privacy/', '/terms/'];
+    // '/' is the logo. A clickable logo that goes home is expected on every
+    // page; what must not appear here is marketing navigation.
+    const allowed = ['/', '/quote/', '/privacy/', '/terms/'];
     const strays = links.filter((href) => !allowed.includes(href));
-    check('/quote has no navigation away from the form',
+    check('/quote has no marketing navigation, only the logo and legal links',
           strays.length === 0, 'stray links: ' + strays.join(', '));
+    check('the /quote logo goes home like every other page',
+          /class="brand" href="\/"/.test(html));
+    check('every surface uses the same logo mark',
+          (html.match(/brand-mark/g) || []).length >= 1);
     check('/quote is noindex (ad landing pages should not be crawled)',
           /noindex/.test(html));
     check('/quote mounts the quote app', /data-quote-app/.test(html));
