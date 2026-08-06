@@ -274,7 +274,7 @@
     // already labels its own field (a text input, an address block), the
     // heading stays clean — otherwise "Drop-off address REQUIRED" sits right
     // above "Street address REQUIRED", which says the same thing twice.
-    var bodyLabelsItself = /class="tag tag-(req|opt)"/.test(body || '');
+    var bodyLabelsItself = /class="tag tag-req"/.test(body || '');
     var tag = (opts.tag === false || bodyLabelsItself) ? ''
       : opts.optional ? '<span class="tag tag-opt">Optional</span>'
         : '<span class="tag tag-req">Required</span>';
@@ -392,10 +392,10 @@
 
     if (state.timing === 'specific_date') {
       out += question('service_date', 'Which day?', { reveal: true },
-        '<div class="field"><label for="f-service_date"><span>Preferred date</span>' +
-        '<span class="tag tag-req">Required</span></label>' +
+        '<div class="field"><label for="f-service_date">Preferred date</label>' +
         '<input id="f-service_date" data-key="service_date" type="date" min="' +
-        todayISO() + '" value="' + esc(state.service_date) + '"></div>');
+        todayISO() + '" value="' + esc(state.service_date) + '" required ' +
+        'aria-required="true"></div>');
     }
 
     if (state.timing) {
@@ -573,19 +573,18 @@
     if (state.manual_address || !config.addressLookupEnabled) {
       return '<div class="field-grid">' +
         '<div class="field" style="grid-column:1/-1">' +
-        '<label for="f-' + k.street + '"><span>Street address</span>' +
-        '<span class="tag tag-req">Required</span></label>' +
+        '<label for="f-' + k.street + '">Street address</label>' +
         '<input id="f-' + k.street + '" data-key="' + k.street + '" type="text" value="' +
-        esc(state[k.street]) + '" placeholder="123 Main St" autocomplete="address-line1"></div>' +
-        '<div class="field"><label for="f-' + k.city + '"><span>City</span>' +
-        '<span class="tag tag-req">Required</span></label>' +
+        esc(state[k.street]) + '" placeholder="123 Main St" autocomplete="address-line1" ' +
+        'required aria-required="true"></div>' +
+        '<div class="field"><label for="f-' + k.city + '">City</label>' +
         '<input id="f-' + k.city + '" data-key="' + k.city + '" type="text" value="' +
-        esc(state[k.city]) + '" placeholder="Kent" autocomplete="address-level2"></div>' +
-        '<div class="field"><label for="f-' + k.zip + '"><span>ZIP code</span>' +
-        '<span class="tag tag-req">Required</span></label>' +
+        esc(state[k.city]) + '" placeholder="Kent" autocomplete="address-level2" ' +
+        'required aria-required="true"></div>' +
+        '<div class="field"><label for="f-' + k.zip + '">ZIP code</label>' +
         '<input id="f-' + k.zip + '" data-key="' + k.zip + '" type="text" inputmode="numeric" ' +
         'maxlength="5" value="' + esc(state[k.zip]) + '" placeholder="98030" ' +
-        'autocomplete="postal-code"></div>' +
+        'autocomplete="postal-code" required aria-required="true"></div>' +
         '<div class="field"><label for="f-' + k.unit + '"><span>Unit</span>' +
         '<span class="tag tag-opt">Optional</span></label>' +
         '<input id="f-' + k.unit + '" data-key="' + k.unit + '" type="text" maxlength="30" ' +
@@ -593,9 +592,9 @@
     }
 
     return '<div class="field addr" data-addr="' + which + '">' +
-      '<label for="f-addr-' + which + '"><span>Street address</span>' +
-      '<span class="tag tag-req">Required</span></label>' +
+      '<label for="f-addr-' + which + '">Street address</label>' +
       '<input id="f-addr-' + which + '" type="text" autocomplete="off" role="combobox" ' +
+      'required aria-required="true" ' +
       'aria-expanded="false" aria-autocomplete="list" aria-controls="menu-' + which + '" ' +
       'value="' + esc(state[k.street]) + '" placeholder="Start typing: 123 Main…">' +
       '<ul class="addr-menu" id="menu-' + which + '" role="listbox" hidden></ul>' +

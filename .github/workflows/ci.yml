@@ -40,6 +40,10 @@ jobs:
         run: node build.js
       - name: Check the quote app parses
         run: node -e "new Function(require('fs').readFileSync('dist/js/main.js','utf8'))"
+      - name: Install test dependencies
+        run: npm install --no-audit --no-fund
+      - name: DOM tests (photo controls, required labels, /quote page)
+        run: node test/quote-form.test.js
 
   secret-scan:
     runs-on: ubuntu-latest
