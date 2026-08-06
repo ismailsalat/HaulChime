@@ -245,12 +245,20 @@ def login_post():
 
         account = PartnerAccount.query.filter_by(phone=checked.e164).first()
         if not account:
-            # Same message whether or not the number exists: confirming which
-            # numbers are partners would leak the partner list.
+            # The person sees the same message whether or not the number
+            # exists — confirming which numbers are partners would leak the
+            # partner list. But the server log says plainly what happened, so
+            # "I never got a code" is answerable from the Railway logs.
+            logger.warn("partner.login_no_account", masked=checked.masked,
+                        hint="No PartnerAccount for this number. An account is "
+                             "created when an application is APPROVED — check "
+                             "/admin/partner-applications.")
             flash("If that number is on a HaulChime partner account, "
                   "a code is on its way.", "ok")
             return render_template("partner/login.html", step="code",
                                    phone=raw, masked=checked.masked)
+        logger.info("partner.login_code_requested", partner_id=account.partner_id,
+                    masked=checked.masked)
         try:
             result = sms_verification.start_verification(
                 raw_phone=raw, quote_draft_id="partner_login",

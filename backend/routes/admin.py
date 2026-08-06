@@ -653,13 +653,22 @@ def delete_partner(partner_id):
     from models import (LeadAssignment, PartnerAccount, PartnerActivity,
                         PartnerApplication, PartnerAvailability,
                         PartnerNotification, PartnerTimeOff)
+    # Clear every reference before deleting the rows they point at, for the
+    # same reason as above.
+    PartnerActivity.query.filter_by(partner_id=p.id).update(
+        {"partner_id": None, "assignment_id": None}, synchronize_session=False)
+    partner_assignments = [row.id for row in
+                           LeadAssignment.query.filter_by(partner_id=p.id).all()]
+    if partner_assignments:
+        PartnerActivity.query.filter(
+            PartnerActivity.assignment_id.in_(partner_assignments)).update(
+            {"assignment_id": None}, synchronize_session=False)
+    db.session.flush()
     LeadAssignment.query.filter_by(partner_id=p.id).delete()
     PartnerNotification.query.filter_by(partner_id=p.id).delete()
     PartnerAvailability.query.filter_by(partner_id=p.id).delete()
     PartnerTimeOff.query.filter_by(partner_id=p.id).delete()
     PartnerAccount.query.filter_by(partner_id=p.id).delete()
-    PartnerActivity.query.filter_by(partner_id=p.id).update(
-        {"partner_id": None, "assignment_id": None}, synchronize_session=False)
     PartnerApplication.query.filter_by(partner_id=p.id).update(
         {"partner_id": None, "status": "rejected"}, synchronize_session=False)
 
@@ -769,13 +778,24 @@ def delete_lead(lead_id):
     # Everything in the partner tables that points at this lead. Without this
     # the delete fails on a foreign key, which is the 500 the admin saw.
     from models import LeadAssignment, PartnerActivity, PartnerNotification
-    assignment_count = LeadAssignment.query.filter_by(lead_id=lead.id).delete()
-    PartnerNotification.query.filter_by(lead_id=lead.id).delete()
-    # Partner activity is the partner's own history, not the customer's, so it
-    # is detached rather than destroyed — otherwise deleting a lead quietly
-    # rewrites what a partner did.
+
+    # ORDER MATTERS. PartnerActivity references BOTH the lead and the
+    # assignment, so its references are cleared FIRST — deleting the
+    # assignments while activity rows still point at them is a foreign-key
+    # violation, and that is the 500 this handler shipped with.
+    # Activity is detached rather than destroyed: the partner's own history
+    # should survive the customer's data being removed.
+    assignment_ids = [row.id for row in
+                      LeadAssignment.query.filter_by(lead_id=lead.id).all()]
     PartnerActivity.query.filter_by(lead_id=lead.id).update(
-        {"lead_id": None, "assignment_id": None})
+        {"lead_id": None, "assignment_id": None}, synchronize_session=False)
+    if assignment_ids:
+        PartnerActivity.query.filter(
+            PartnerActivity.assignment_id.in_(assignment_ids)).update(
+            {"assignment_id": None}, synchronize_session=False)
+    PartnerNotification.query.filter_by(lead_id=lead.id).delete()
+    db.session.flush()
+    assignment_count = LeadAssignment.query.filter_by(lead_id=lead.id).delete()
 
     db.session.delete(lead)
     db.session.flush()

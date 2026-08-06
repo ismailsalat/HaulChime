@@ -294,6 +294,7 @@ def register(bp, login_required, check_csrf):
         # partner's history survives but the delete isn't blocked.
         PartnerActivity.query.filter_by(assignment_id=assignment.id).update(
             {"assignment_id": None}, synchronize_session=False)
+        db.session.flush()          # land the update before the delete
         db.session.delete(assignment)
         remaining = LeadAssignment.query.filter_by(lead_id=lead.id).count()
         if remaining <= 1:

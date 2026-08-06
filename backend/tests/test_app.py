@@ -1747,3 +1747,150 @@ def test_deleting_a_partner_with_a_full_history_succeeds():
         # And the lead itself is untouched, just unassigned.
         assert Lead.query.get(1) is not None
         assert Lead.query.get(1).partner_id is None
+
+
+def test_deleting_a_lead_a_partner_actually_worked_on():
+    """The earlier delete test only covered a freshly assigned lead. Once a
+    partner views or accepts it, PartnerActivity rows carry an assignment_id —
+    and deleting the assignment while those still point at it violates a
+    foreign key. That is the 500 the admin hit in production."""
+    from models import LeadAssignment, PartnerActivity, PartnerNotification
+    app = make_app(); client = app.test_client()
+    client.post("/api/leads", data=valid_payload())
+    partner_id, account_id = _approved_partner(app)
+    with app.app_context():
+        lead = Lead.query.first()
+        reference, lead_id = lead.reference, lead.id
+    assignment_id = _assign(app, lead_id, partner_id)
+
+    # The partner opens and accepts it, which is what creates activity rows
+    # bound to the assignment.
+    portal = app.test_client()
+    csrf = _sign_in(portal, account_id)
+    portal.get(f"/partner/leads/{reference}")
+    portal.post(f"/partner/leads/{reference}/accept", data={"csrf_token": csrf})
+    with app.app_context():
+        assert PartnerActivity.query.filter(
+            PartnerActivity.assignment_id.isnot(None)).count() >= 1
+
+    admin_csrf = _login(client)
+    response = client.post(f"/admin/leads/{lead_id}/delete",
+                           data={"csrf_token": admin_csrf, "confirm_text": "DELETE"},
+                           follow_redirects=True)
+    assert response.status_code == 200
+    assert "Something went wrong" not in response.get_data(as_text=True)
+    with app.app_context():
+        assert Lead.query.count() == 0
+        assert LeadAssignment.query.count() == 0
+        assert PartnerNotification.query.count() == 0
+
+
+def test_login_actually_sends_a_code_for_a_real_account():
+    """The neutral 'a code is on its way' message is shown even when no
+    account exists, so this proves a real account genuinely triggers a send."""
+    app = make_app()
+    app.config["DEV_OTP_CODE"] = "123456"
+    _approved_partner(app, "Real Co", "+12065550188")
+    client = app.test_client()
+    client.get("/partner/login")
+    with client.session_transaction() as sess:
+        csrf = sess["partner_csrf_token"]
+
+    client.post("/partner/login", data={
+        "csrf_token": csrf, "step": "phone", "phone": "2065550188"})
+    with client.session_transaction() as sess:
+        # A verification attempt was actually started and bound to the session.
+        assert sess.get("partner_login_attempt"), "no code was sent"
+        assert sess.get("partner_login_phone") == "+12065550188"
+
+    # An unknown number looks identical to the visitor but starts nothing.
+    other = app.test_client()
+    other.get("/partner/login")
+    with other.session_transaction() as sess:
+        csrf2 = sess["partner_csrf_token"]
+    response = other.post("/partner/login", data={
+        "csrf_token": csrf2, "step": "phone", "phone": "2065550177"})
+    assert "code is on its way" in response.get_data(as_text=True)
+    with other.session_transaction() as sess:
+        assert not sess.get("partner_login_attempt")
+
+
+def test_admin_can_see_which_partners_can_sign_in():
+    """Answers 'why did my partner not get a code' without reading logs."""
+    from models import Partner
+    app = make_app(); client = app.test_client()
+    _approved_partner(app, "Has Login", "+12065550166")
+    with app.app_context():
+        db.session.add(Partner(name="Added By Hand", service_zips="98030",
+                               active=True, crew_size=2))
+        db.session.commit()
+    _login(client)
+    page = client.get("/admin/partners").get_data(as_text=True)
+    assert "Portal login ready" in page
+    assert "No portal login" in page
+
+
+def test_every_delete_path_survives_a_fully_populated_record():
+    """A sweep rather than a single case: build a lead and partner with every
+    related row that exists, then delete each. Any new table that references
+    them will fail here rather than in production."""
+    from models import (LeadAssignment, PartnerActivity, PartnerNotification,
+                        PartnerAvailability, PartnerTimeOff, Partner)
+    from datetime import date, timedelta
+
+    def build():
+        app = make_app(); client = app.test_client()
+        client.post("/api/leads", data=valid_payload())
+        partner_id, account_id = _approved_partner(app, "Full", "+12065550155")
+        with app.app_context():
+            lead = Lead.query.first()
+            reference, lead_id = lead.reference, lead.id
+            db.session.add(PartnerAvailability(partner_id=partner_id,
+                                               day_of_week=2, available=True))
+            db.session.add(PartnerTimeOff(partner_id=partner_id,
+                                          start_date=date.today(),
+                                          end_date=date.today() + timedelta(days=1)))
+            db.session.commit()
+        _assign(app, lead_id, partner_id)
+        portal = app.test_client()
+        pcsrf = _sign_in(portal, account_id)
+        portal.get(f"/partner/leads/{reference}")
+        portal.post(f"/partner/leads/{reference}/accept", data={"csrf_token": pcsrf})
+        portal.post(f"/partner/leads/{reference}/status",
+                    data={"csrf_token": pcsrf, "status": "job_booked"})
+        return app, client, partner_id, lead_id
+
+    # 1. Delete the lead.
+    app, client, partner_id, lead_id = build()
+    csrf = _login(client)
+    r = client.post(f"/admin/leads/{lead_id}/delete",
+                    data={"csrf_token": csrf, "confirm_text": "DELETE"},
+                    follow_redirects=True)
+    assert "Something went wrong" not in r.get_data(as_text=True)
+    with app.app_context():
+        assert Lead.query.count() == 0 and LeadAssignment.query.count() == 0
+
+    # 2. Delete the partner.
+    app, client, partner_id, lead_id = build()
+    csrf = _login(client)
+    r = client.post(f"/admin/partners/{partner_id}/delete",
+                    data={"csrf_token": csrf}, follow_redirects=True)
+    body = r.get_data(as_text=True)
+    assert "Couldn't delete" not in body and "Something went wrong" not in body
+    with app.app_context():
+        assert Partner.query.get(partner_id) is None
+        assert Lead.query.get(lead_id) is not None      # the lead survives
+
+    # 3. Remove the assignment.
+    app, client, partner_id, lead_id = build()
+    csrf = _login(client)
+    with app.app_context():
+        assignment_id = LeadAssignment.query.one().id
+    r = client.post(f"/admin/leads/{lead_id}/unassign",
+                    data={"csrf_token": csrf, "assignment_id": assignment_id},
+                    follow_redirects=True)
+    assert "Something went wrong" not in r.get_data(as_text=True)
+    with app.app_context():
+        assert LeadAssignment.query.count() == 0
+        assert PartnerNotification.query.filter_by(read=False).count() == 0
+        assert PartnerActivity.query.count() >= 1       # history kept
