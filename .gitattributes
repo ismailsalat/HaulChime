@@ -1,0 +1,13 @@
+# Normalise line endings so Windows checkouts stop rewriting every file.
+* text=auto eol=lf
+
+# Windows batch files genuinely need CRLF.
+*.bat text eol=crlf
+
+# Never touch binaries.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.ico binary
+*.zip binary
+*.pdf binary
