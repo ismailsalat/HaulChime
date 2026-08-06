@@ -1,7 +1,5 @@
 {
   "projects": {
-    "default": "haulchime"
-  },
-  "targets": {},
-  "etags": {}
+    "default": "REPLACE-WITH-YOUR-FIREBASE-PROJECT-ID"
+  }
 }

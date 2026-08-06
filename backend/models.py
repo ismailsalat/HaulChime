@@ -181,7 +181,10 @@ class Lead(db.Model):
     # customer, never rendered on a customer-facing page.
     estimated_job_value = db.Column(db.Numeric(10, 2))
     cost_breakdown = db.Column(db.Text)          # JSON from job_costing.py
-    cost_confidence = db.Column(db.String(10))   # high | medium | low
+    # Wide enough for the longest value the model can produce
+    # ("insufficient_information", 24 chars). It was String(10), which SQLite
+    # accepted silently and Postgres rejected — every quote submission 500'd.
+    cost_confidence = db.Column(db.String(40))
     difficulty_score = db.Column(db.Integer, default=0)
     information_score = db.Column(db.Integer, default=0)
     lead_tier = db.Column(db.String(30), default="standard", index=True)

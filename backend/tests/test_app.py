@@ -1894,3 +1894,73 @@ def test_every_delete_path_survives_a_fully_populated_record():
         assert LeadAssignment.query.count() == 0
         assert PartnerNotification.query.filter_by(read=False).count() == 0
         assert PartnerActivity.query.count() >= 1       # history kept
+
+
+def test_no_string_column_is_too_short_for_what_the_code_writes():
+    """SQLite ignores VARCHAR limits; Postgres enforces them. A column that is
+    one character too short therefore passes every local test and 500s in
+    production — which is exactly how quote submission broke, with
+    cost_confidence declared String(10) and 'insufficient_information'
+    (24 chars) written into it."""
+    import re
+    import pathlib
+    import job_costing
+    from models import (ASSIGNMENT_STATUSES, DECLINE_REASONS,
+                        APPLICATION_STATUSES)
+    from routes.public import (ACCESS, CONTACTS, CONTACT_TIMES, ITEM_CATEGORIES,
+                               JOB_SIZES, JOB_TYPES, PARKING, PREFERRED_TIMES,
+                               PROPERTY_TYPES, SERVICE_TYPES, URGENCIES, FLIGHTS)
+
+    source = pathlib.Path("models.py").read_text(encoding="utf-8")
+    limits = {m.group(1): int(m.group(2)) for m in
+              re.finditer(r"(\w+)\s*=\s*db\.Column\(db\.String\((\d+)\)", source)}
+
+    # Every vocabulary the application can write, mapped to its column.
+    written = {
+        "cost_confidence": ["high", "medium", "low", "insufficient_information"],
+        "service_type": SERVICE_TYPES, "pest_type": SERVICE_TYPES,
+        "job_type": JOB_TYPES, "job_size": JOB_SIZES,
+        "property_type": PROPERTY_TYPES, "urgency": URGENCIES,
+        "pickup_access": ACCESS, "destination_access": ACCESS,
+        "parking_access": PARKING, "location_seen": ACCESS,
+        "preferred_contact": CONTACTS, "contact_time": CONTACT_TIMES,
+        "preferred_time": PREFERRED_TIMES,
+        "stairs_flights": FLIGHTS, "destination_stairs_flights": FLIGHTS,
+        "decline_reason": DECLINE_REASONS,
+        "status": list(ASSIGNMENT_STATUSES) + [
+            "new", "validation_needed", "sent_to_partner",
+            "outside_service_area", "invalid", "duplicate", "qualified"],
+    }
+    problems = []
+    for column, values in written.items():
+        limit = limits.get(column)
+        if limit is None:
+            continue
+        longest = max(values, key=len)
+        if len(longest) > limit:
+            problems.append(
+                f"{column}: String({limit}) but writes {longest!r} ({len(longest)})")
+    assert not problems, "columns too short for their own values:\n" + "\n".join(problems)
+
+
+def test_a_gated_estimate_still_lets_the_customer_submit():
+    """The customer must never be blocked because we declined to price the job.
+    This is the exact submission that was 500ing: junk removal, heavy item, no
+    detail, so the estimate refuses — and the lead must still be created."""
+    app = make_app(); client = app.test_client()
+    payload = dict(new_form_payload())
+    payload.update({
+        "service_type": "local_move", "job_type": "single_heavy_item",
+        "job_size": "single_item", "item_categories": "heavy_specialty",
+        "special_item_types": "piano", "special_items_note": "",
+        "destination_known": "false", "destination_city": "Renton",
+        "destination_zip": "98055",
+    })
+    response = client.post("/api/leads", data=payload)
+    assert response.status_code == 201, response.get_json()
+
+    with app.app_context():
+        lead = Lead.query.one()
+        assert lead.cost_confidence == "insufficient_information"
+        assert lead.estimated_job_value is None      # no invented figure
+        assert len(lead.cost_confidence) <= 40       # fits the column

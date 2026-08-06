@@ -576,7 +576,7 @@ def create_lead():
         # deliberately returns no figure rather than a guessed one.
         estimated_job_value=economics.get("estimated_job_value"),
         cost_breakdown=json.dumps(economics),
-        cost_confidence=economics.get("confidence"),
+        cost_confidence=(economics.get("confidence") or "")[:40] or None,
         difficulty_score=result["difficulty_score"], information_score=result["information_score"],
         lead_tier=result["tier"], lead_price=result["price"], lead_charge=result["price"],
         job_details=json.dumps(details, default=str), photo_keys=",".join(photo_keys),

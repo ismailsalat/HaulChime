@@ -28,6 +28,27 @@ def _ensure_schema():
             logger.warn("db.schema_migrated",
                         f"added missing column {table.name}.{col.name}",
                         table=table.name, column=col.name)
+
+        # Widen any VARCHAR that is now shorter than the model declares.
+        # ADD COLUMN handles new fields, but a column whose length grew is
+        # invisible to it — and Postgres rejects the oversized value while
+        # SQLite shrugs, so the failure only ever appears in production.
+        # This is additive and non-destructive: widening never truncates.
+        if db.engine.dialect.name == "postgresql":
+            sizes = {c["name"]: getattr(c["type"], "length", None)
+                     for c in inspector.get_columns(table.name)}
+            for col in table.columns:
+                wanted = getattr(col.type, "length", None)
+                current = sizes.get(col.name)
+                if (wanted and current and current < wanted
+                        and col.type.__class__.__name__ in ("String", "VARCHAR")):
+                    db.session.execute(text(
+                        f'ALTER TABLE {table.name} ALTER COLUMN {col.name} '
+                        f'TYPE VARCHAR({wanted})'))
+                    logger.warn("db.column_widened",
+                                f"widened {table.name}.{col.name} "
+                                f"from {current} to {wanted}",
+                                table=table.name, column=col.name)
     db.session.commit()
 
 
